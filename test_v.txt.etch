@@ -1,0 +1,11 @@
+{
+  "fingerprints": [
+    {
+      "contributor_pubkey": "7d365476411ca4a3686a63e4982a3993d249b91d3b13cbc8dcd27f82bd1f34e6",
+      "timestamp": "2026-03-30T08:01:01.879723600+00:00",
+      "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
+      "prev_hash": "genesis",
+      "signature": "4979c7f3bd709edca796c68f497df188938ba4279e56f2ff8525fdb46fa4430d2489678066005d2dde9acc533a60389d54da55616c1e3d3c3330f81f6082a907"
+    }
+  ]
+}

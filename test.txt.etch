@@ -1,0 +1,18 @@
+{
+  "fingerprints": [
+    {
+      "contributor_pubkey": "d33b3894f0ce98c4d1c7bd2f34ae97bf72f2a9cb1b00969fdb1be75437889c2f",
+      "timestamp": "2026-03-30T07:57:01.664020800+00:00",
+      "code_hash": "32f5d4318d07b33ceac051f724144ff5cb6bbcb3ee22289f0fd0a3d6e376b82a",
+      "prev_hash": "tampered",
+      "signature": "f0e48c0209f693386d43016ecf67f5cf068fbbdc1e633ec28064758516985013d9b8604d35dc5d1e7b1f9d103df6428dcae2ba811c3f46564f6e09123c0aca05"
+    },
+    {
+      "contributor_pubkey": "d33b3894f0ce98c4d1c7bd2f34ae97bf72f2a9cb1b00969fdb1be75437889c2f",
+      "timestamp": "2026-03-30T07:57:05.596645200+00:00",
+      "code_hash": "32f5d4318d07b33ceac051f724144ff5cb6bbcb3ee22289f0fd0a3d6e376b82a",
+      "prev_hash": "58c64f6f36525879d2c10259961870f42f5b6d426b63db32ec0a668c3a2c489d",
+      "signature": "88c76b13f8d8812ea8aedd0d65d1d0982a243ff9d5e8224a0e7404704dfaa70fc4c7c41601fa10613cae856a2ad8fbce210e15525247eaa40cb7b33650d52604"
+    }
+  ]
+}
