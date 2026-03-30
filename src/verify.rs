@@ -103,6 +103,9 @@ pub fn verify_file(path: &str) -> io::Result<VerificationReport> {
                 actual: Some(f.prev_hash.clone()),
                 reason_code: Some("prev_hash_mismatch".to_string()),
             });
+            // We MUST not break here if we want to check other things, but usually chain break is fatal.
+            // However, the task asks for a report. If we break, we don't check subsequent entries.
+            // For now, let's keep the break as it is a critical failure.
             break;
         }
 
@@ -276,4 +279,336 @@ fn verify_signature(f: &Fingerprint, payload: &[u8]) -> Result<(), String> {
     verifying_key.verify(payload, &signature).map_err(|_| "signature_invalid".to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::EtchIdentity;
+    use crate::fingerprint::{sign_file, hash_fingerprint};
+    use crate::chain::AuthorshipChain;
+    use ed25519_dalek::Signer;
+    use std::fs;
+    use chrono::{Utc, Duration};
+
+    fn setup_test_identity() -> EtchIdentity {
+        EtchIdentity::generate()
+    }
+
+    fn create_test_file(path: &str, content: &str) {
+        fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn test_signature_verify_valid() {
+        let id = setup_test_identity();
+        let path = "test_sig_valid.txt";
+        create_test_file(path, "hello");
+        let f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        
+        let mut chain = AuthorshipChain::new();
+        chain.append(f).unwrap();
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(report.verdict);
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_signature_verify_wrong_key() {
+        let id1 = setup_test_identity();
+        let id2 = setup_test_identity();
+        let path = "test_sig_wrong_key.txt";
+        create_test_file(path, "hello");
+        let mut f = sign_file(path, &id1, "genesis".to_string()).unwrap();
+        
+        // Tamper with pubkey
+        f.contributor_pubkey = id2.public_key_hex();
+
+        let mut chain = AuthorshipChain::new();
+        chain.append(f).unwrap();
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert_eq!(report.results.iter().find(|r| r.check_id == "signature_verification").unwrap().reason_code, Some("signature_invalid".to_string()));
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_signature_verify_tampered_bytes() {
+        let id = setup_test_identity();
+        let path = "test_sig_tamper.txt";
+        create_test_file(path, "hello");
+        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        
+        // Tamper with signature bytes
+        let mut sig_bytes = hex::decode(&f.signature).unwrap();
+        sig_bytes[0] ^= 0xFF;
+        f.signature = hex::encode(sig_bytes);
+
+        let mut chain = AuthorshipChain::new();
+        chain.append(f).unwrap();
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert_eq!(report.results.iter().find(|r| r.check_id == "signature_verification").unwrap().reason_code, Some("signature_invalid".to_string()));
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_signature_verify_malformed_signature() {
+        let id = setup_test_identity();
+        let path = "test_sig_malformed.txt";
+        create_test_file(path, "hello");
+        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        
+        // Malformed hex length
+        f.signature = "abc123".to_string();
+
+        let mut chain = AuthorshipChain::new();
+        chain.fingerprints.push(f);
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert_eq!(report.results.iter().find(|r| r.check_id == "schema_validation").unwrap().reason_code, Some("signature_invalid".to_string()));
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_signature_verify_replay_attack() {
+        let id = setup_test_identity();
+        let path1 = "test_replay1.txt";
+        let path2 = "test_replay2.txt";
+        create_test_file(path1, "hello");
+        create_test_file(path2, "world");
+        
+        let f1 = sign_file(path1, &id, "genesis".to_string()).unwrap();
+        
+        // Replay f1 onto path2
+        let mut chain2 = AuthorshipChain::new();
+        chain2.fingerprints.push(f1);
+        chain2.save_for_file(path2).unwrap();
+
+        let report = verify_file(path2).unwrap();
+        assert!(!report.verdict);
+        // Should fail artifact binding because code_hash matches path1 not path2
+        assert_eq!(report.results.iter().find(|r| r.check_id == "artifact_binding").unwrap().reason_code, Some("file_hash_mismatch".to_string()));
+        
+        fs::remove_file(path1).ok();
+        fs::remove_file(path2).ok();
+        fs::remove_file(format!("{}.etch", path1)).ok();
+        fs::remove_file(format!("{}.etch", path2)).ok();
+    }
+
+    #[test]
+    fn test_chain_integrity_valid_n_entry() {
+        let id = setup_test_identity();
+        let path = "test_chain_n.txt";
+        create_test_file(path, "hello");
+        
+        let mut chain = AuthorshipChain::new();
+        let f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let h1 = hash_fingerprint(&f1).unwrap();
+        chain.append(f1).unwrap();
+        
+        let f2 = sign_file(path, &id, h1).unwrap();
+        chain.append(f2).unwrap();
+        
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(report.verdict);
+        assert_eq!(report.verified_through_index, Some(1));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_chain_integrity_broken_prev_hash() {
+        let id = setup_test_identity();
+        let path = "test_chain_broken.txt";
+        create_test_file(path, "hello");
+        
+        let mut chain = AuthorshipChain::new();
+        let f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let h1 = hash_fingerprint(&f1).unwrap();
+        chain.append(f1).unwrap();
+        
+        let mut f2 = sign_file(path, &id, h1).unwrap();
+        f2.prev_hash = "wrong".to_string();
+        chain.fingerprints.push(f2);
+        
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert_eq!(report.results.iter().find(|r| r.check_id == "chain_integrity").unwrap().reason_code, Some("prev_hash_mismatch".to_string()));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_chain_integrity_reordered() {
+        let id = setup_test_identity();
+        let path = "test_chain_reorder.txt";
+        create_test_file(path, "hello");
+        
+        let mut chain = AuthorshipChain::new();
+        let f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let h1 = hash_fingerprint(&f1).unwrap();
+        let f2 = sign_file(path, &id, h1).unwrap();
+        
+        chain.fingerprints.push(f2);
+        chain.fingerprints.push(f1);
+        
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        // First entry should have "genesis" as prev_hash, but it has h1
+        assert_eq!(report.results.iter().find(|r| r.check_id == "chain_integrity").unwrap().reason_code, Some("prev_hash_mismatch".to_string()));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_tamper_detection_modified_code_hash() {
+        let id = setup_test_identity();
+        let path = "test_tamper_hash.txt";
+        create_test_file(path, "hello");
+        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        
+        f.code_hash = hex::encode([0u8; 32]); // wrong hash
+
+        let mut chain = AuthorshipChain::new();
+        chain.fingerprints.push(f);
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        // Fails signature first because code_hash is signed
+        assert_eq!(report.results.iter().find(|r| r.check_id == "signature_verification").unwrap().reason_code, Some("signature_invalid".to_string()));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_tamper_detection_modified_file_content() {
+        let id = setup_test_identity();
+        let path = "test_tamper_content.txt";
+        create_test_file(path, "hello");
+        let f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        
+        let mut chain = AuthorshipChain::new();
+        chain.append(f).unwrap();
+        chain.save_for_file(path).unwrap();
+
+        // Modify file content after signing
+        fs::write(path, "tampered").unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert_eq!(report.results.iter().find(|r| r.check_id == "artifact_binding").unwrap().reason_code, Some("file_hash_mismatch".to_string()));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_temporal_policy_violation_monotonicity() {
+        let id = setup_test_identity();
+        let path = "test_time_mono.txt";
+        create_test_file(path, "hello");
+        
+        let mut f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        // Set f1 to 2 minute in future
+        f1.timestamp = (Utc::now() + Duration::minutes(2)).to_rfc3339();
+        
+        // RE-SIGN f1 because timestamp changed
+        let payload1 = SigningPayload {
+            protocol_tag: "etch-v1",
+            hash_algorithm: "sha2-256",
+            code_hash: &f1.code_hash,
+            contributor_pubkey: &f1.contributor_pubkey,
+            prev_hash: &f1.prev_hash,
+            timestamp: &f1.timestamp,
+        };
+        let canonical1 = serde_json::to_vec(&payload1).unwrap();
+        f1.signature = hex::encode(id.signing_key.sign(&canonical1).to_bytes());
+
+        let h1 = hash_fingerprint(&f1).unwrap();
+        
+        let mut f2 = sign_file(path, &id, h1).unwrap();
+        // f2 is now, which is earlier than f1
+        f2.timestamp = Utc::now().to_rfc3339();
+        
+        // RE-SIGN f2 because timestamp changed
+        let payload2 = SigningPayload {
+            protocol_tag: "etch-v1",
+            hash_algorithm: "sha2-256",
+            code_hash: &f2.code_hash,
+            contributor_pubkey: &f2.contributor_pubkey,
+            prev_hash: &f2.prev_hash,
+            timestamp: &f2.timestamp,
+        };
+        let canonical2 = serde_json::to_vec(&payload2).unwrap();
+        f2.signature = hex::encode(id.signing_key.sign(&canonical2).to_bytes());
+        
+        let mut chain = AuthorshipChain::new();
+        chain.fingerprints.push(f1);
+        chain.fingerprints.push(f2);
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert!(report.results.iter().any(|r| r.check_id == "temporal_policy" && r.reason_code == Some("sequence_invalid".to_string())));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
+
+    #[test]
+    fn test_temporal_policy_violation_future_skew() {
+        let id = setup_test_identity();
+        let path = "test_time_future.txt";
+        create_test_file(path, "hello");
+        
+        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        f.timestamp = (Utc::now() + Duration::minutes(10)).to_rfc3339(); // 10 mins in future
+        
+        // RE-SIGN because timestamp changed
+        let payload = SigningPayload {
+            protocol_tag: "etch-v1",
+            hash_algorithm: "sha2-256",
+            code_hash: &f.code_hash,
+            contributor_pubkey: &f.contributor_pubkey,
+            prev_hash: &f.prev_hash,
+            timestamp: &f.timestamp,
+        };
+        let canonical = serde_json::to_vec(&payload).unwrap();
+        f.signature = hex::encode(id.signing_key.sign(&canonical).to_bytes());
+
+        let mut chain = AuthorshipChain::new();
+        chain.fingerprints.push(f);
+        chain.save_for_file(path).unwrap();
+
+        let report = verify_file(path).unwrap();
+        assert!(!report.verdict);
+        assert!(report.results.iter().any(|r| r.check_id == "temporal_policy" && r.reason_code == Some("timestamp_policy_violation".to_string())));
+        
+        fs::remove_file(path).ok();
+        fs::remove_file(format!("{}.etch", path)).ok();
+    }
 }

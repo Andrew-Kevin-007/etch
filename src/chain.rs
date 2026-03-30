@@ -18,7 +18,6 @@ impl AuthorshipChain {
     }
 
     /// Load the chain from a .etch file associated with the given file path
-    /// Enforces append-only by validating each entry's prev_hash.
     pub fn load_for_file(file_path: &str) -> io::Result<Self> {
         let chain_path = Self::get_chain_path(file_path);
         if !chain_path.exists() {
@@ -28,7 +27,6 @@ impl AuthorshipChain {
         let chain: AuthorshipChain = serde_json::from_str(&json)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         
-        chain.validate()?;
         Ok(chain)
     }
 

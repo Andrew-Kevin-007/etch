@@ -6,7 +6,7 @@ use std::process;
 
 /// etch: A CLI tool for data integrity and provenance.
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about = "A CLI tool for data integrity and provenance", long_about = "etch allows you to sign files and maintain an immutable authorship chain, ensuring that file integrity and authorship history are cryptographically verifiable.")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -14,22 +14,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a new etch identity
+    /// Initialize a new etch identity (~/.etch/identity.json)
     Init,
     /// Print the current identity's public key
     Whoami,
-    /// Sign a file or data object
+    /// Sign a file and append its fingerprint to the authorship chain
     Sign {
         /// The path to the file to sign
         #[arg(short, long)]
         path: String,
     },
-    /// Verify the integrity of a signed object
+    /// Verify the integrity and authorship chain of a signed file
     Verify {
         /// The path to the file to verify
         #[arg(short, long)]
         path: String,
-        /// Output the verification report as JSON
+        /// Output the full verification report as machine-readable JSON
         #[arg(long)]
         json: bool,
     },
@@ -39,7 +39,15 @@ fn main() {
     let cli = Cli::parse();
 
     if let Err(e) = run(cli) {
-        eprintln!("Error: {}", e);
+        match e.downcast_ref::<std::io::Error>() {
+            Some(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("Error: Resource not found. Please check that the file path or identity exists.");
+            }
+            Some(io_err) if io_err.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("Error: Permission denied. Please check your file system permissions.");
+            }
+            _ => eprintln!("Error: {}.", e),
+        }
         process::exit(1);
     }
 }

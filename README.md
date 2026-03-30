@@ -1,13 +1,64 @@
-# etch
+# Etch: A CLI Tool for Data Integrity and Provenance
 
-**human authorship, etched in code**
+`etch` allows you to sign files and maintain an immutable authorship chain. It is designed to verify that files haven't been tampered with and to track who created or modified them over time.
 
-etch is a research-driven protocol that preserves and verifies human authorship in software.
-In an era where AI can generate and transform code at scale, etch ensures that human
-creators remain cryptographically visible, accountable, and credited.
+## Installation
 
-Code may change.
-Authorship should not disappear.
+You can install `etch` directly from the source using Cargo:
+
+```bash
+cargo install --path .
+```
+
+## Quick Start
+
+### 1. Initialize your identity
+
+Generate a new Ed25519 keypair and save it to `~/.etch/identity.json`:
+
+```bash
+etch init
+```
+
+### 2. Sign a file
+
+Create a fingerprint for a file and append it to its authorship chain:
+
+```bash
+etch sign --path your_file.txt
+```
+
+This creates or updates `your_file.txt.etch`.
+
+### 3. Verify the file
+
+Check the file's integrity and its authorship history:
+
+```bash
+etch verify --path your_file.txt
+```
+
+Example Output:
+```text
+Verification Report for: your_file.txt
+Verdict: PASS
+Verified through entry index: 0
+
+Check Details:
+- schema_validation [Entry 0]: OK
+- chain_integrity [Entry 0]: OK
+- signature_verification [Entry 0]: OK
+- temporal_policy [Entry 0]: OK
+- artifact_binding [Entry 0]: OK
+```
+
+### 4. Verify with JSON output
+
+For automation, use the `--json` flag:
+
+```bash
+etch verify --path your_file.txt --json
+```
 
 ---
 
@@ -40,51 +91,26 @@ and time.
 - **AI as a carrier**  
   AI systems may transform code, but they cannot claim authorship or add fingerprints.
 
-- **Protocol-gated credit**  
-  Not all code changes qualify for authorship.  
-  Contributions must satisfy defined structural or semantic standards to earn a fingerprint.
-
 - **Verifiable by design**  
   Authorship lineage can be independently verified using standard cryptographic assumptions.
 
 ---
 
-## What etch is not
+## What etch is NOT
 
-- Not a license
-- Not a copyright replacement
-- Not a watermark or comment-based attribution
-- Not a blockchain or cryptocurrency system
-
-etch focuses on **authorship provenance**, not ownership or monetization.
-
----
-
-## High-level Model
-
-1. A human creates or meaningfully modifies code.
-2. The code is evaluated against etch contribution standards.
-3. If eligible, the contributor cryptographically signs the code state.
-4. The signature is appended to an immutable authorship chain.
-5. Future modifications preserve the chain.
-6. AI-driven changes do not alter authorship lineage.
-7. When another human contributes meaningfully, a new signature is appended.
-
-Over time, the code accumulates a verifiable human lineage.
+- **Not a Version Control System**: `etch` does not store file history or provide diffing tools. It only tracks authorship of a file's state at the time of signing.
+- **Not a Backup Tool**: `etch` does not store copies of your files.
+- **Not a Replacement for Code Review**: `etch` provides cryptographic proof of *who* signed a file, but not *what* that file contains or its quality.
+- **Not a Sandbox**: `etch` does not prevent malicious files from being signed; it only ensures their provenance is tracked.
+- **Not a license or copyright replacement.**
+- **Not a watermark or comment-based attribution.**
+- **Not a blockchain or cryptocurrency system.**
 
 ---
 
 ## Status
 
 This project is currently **research-in-progress**.
-
-The repository focuses on:
-- protocol definition
-- theoretical foundations
-- threat models
-- future prototype directions
-
-Implementation details will evolve iteratively.
 
 ---
 
@@ -94,9 +120,3 @@ As code becomes easier to generate, **intent, responsibility, and authorship**
 become more valuable than syntax.
 
 etch exists to make sure code remembers the humans behind it.
-
----
-
-## License
-
-To be defined.
