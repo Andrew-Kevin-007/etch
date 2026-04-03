@@ -52,11 +52,17 @@ impl EtchIdentity {
             // Write to a temporary file first to avoid exposing sensitive data with default permissions
             let mut temp_path = path.clone();
             temp_path.set_extension("tmp");
-            fs::write(&temp_path, json)?;
+            fs::write(&temp_path, &json)?;
 
             // Permission hardening (restrict to owner read/write) on the temp file
+            // We use canonical path or absolute path to avoid issues with icacls finding the file
+            let absolute_temp_path = fs::canonicalize(&temp_path).map_err(|e| {
+                let _ = fs::remove_file(&temp_path);
+                e
+            })?;
+
             let output = Command::new("icacls")
-                .arg(&temp_path)
+                .arg(&absolute_temp_path)
                 .arg("/inheritance:r") // remove inheritance
                 .arg("/grant:r")
                 .arg(format!("{}:(R,W)", username))

@@ -22,6 +22,7 @@ fn test_end_to_end_sign_verify() {
         .arg("sign")
         .arg("--path")
         .arg(&file_path)
+        .arg("--force")
         .output()
         .expect("failed to execute sign");
     assert!(output.status.success());
@@ -49,7 +50,11 @@ fn test_modify_file_after_sign_fails() {
 
     // 1. Sign
     Command::new(&etch_exe).arg("init").output().unwrap();
-    Command::new(&etch_exe).arg("sign").arg("--path").arg(&file_path).output().unwrap();
+    Command::new(&etch_exe).arg("sign")
+        .arg("--path")
+        .arg(&file_path)
+        .arg("--force")
+        .output().unwrap();
 
     // 2. Modify file
     fs::write(&file_path, "tampered content").unwrap();
@@ -88,7 +93,11 @@ fn test_sequential_signing_two_identities() {
     let out1 = Command::new(&etch_exe).arg("whoami").output().unwrap();
     let pub1 = String::from_utf8_lossy(&out1.stdout);
 
-    Command::new(&etch_exe).arg("sign").arg("--path").arg(&file_path).output().unwrap();
+    Command::new(&etch_exe).arg("sign")
+        .arg("--path")
+        .arg(&file_path)
+        .arg("--force")
+        .output().unwrap();
 
     // 2. Second identity signs (re-init)
     Command::new(&etch_exe).arg("init").output().unwrap();
@@ -96,7 +105,11 @@ fn test_sequential_signing_two_identities() {
     let pub2 = String::from_utf8_lossy(&out2.stdout);
     assert_ne!(pub1, pub2);
 
-    Command::new(&etch_exe).arg("sign").arg("--path").arg(&file_path).output().unwrap();
+    Command::new(&etch_exe).arg("sign")
+        .arg("--path")
+        .arg(&file_path)
+        .arg("--force")
+        .output().unwrap();
 
     // 3. Verify
     let output = Command::new(&etch_exe)

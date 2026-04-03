@@ -23,6 +23,9 @@ enum Commands {
         /// The path to the file to sign
         #[arg(short, long)]
         path: String,
+        /// Force signing even if contribution analysis fails
+        #[arg(short, long)]
+        force: bool,
     },
     /// Verify the integrity and authorship chain of a signed file
     Verify {
@@ -64,11 +67,40 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let identity = EtchIdentity::load()?;
             println!("Public Key: {}", identity.public_key_hex());
         }
-        Some(Commands::Sign { path }) => {
+        Some(Commands::Sign { path, force }) => {
             let identity = EtchIdentity::load()?;
             
             // Contribution analysis
-            let (analysis, tree, source) = etch::analyzer::parse_file(&path)?;
+            let analysis_result = etch::analyzer::parse_file(&path);
+            
+            let (analysis, tree, source) = match analysis_result {
+                Ok(res) => res,
+                Err(e) => {
+                    if force {
+                        eprintln!("Warning: Contribution analysis failed: {}. Proceeding due to --force.", e);
+                        // We need some way to proceed without analysis. 
+                        // The current sign_file doesn't need analysis results, it just needs the path.
+                        // So we can just skip the analysis part.
+                        
+                        let mut chain = AuthorshipChain::load_for_file(&path)?;
+                        let prev_hash = if let Some(last) = chain.fingerprints.last() {
+                            fingerprint::hash_fingerprint(last)?
+                        } else {
+                            "genesis".to_string()
+                        };
+
+                        let fingerprint = fingerprint::sign_file(&path, &identity, prev_hash)?;
+                        chain.append(fingerprint)?;
+                        chain.save_for_file(&path)?;
+                        
+                        println!("File '{}' signed successfully (forced).", path);
+                        return Ok(());
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
+
             let logic = etch::analyzer::detect_logic(&tree, &source);
             let arch = etch::analyzer::detect_architecture(&tree, &source);
             let verdict = etch::analyzer::score_contribution(&analysis, &logic, &arch);
@@ -86,6 +118,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("- Score: {:.2}", verdict.score);
             println!("");
+
+            if !verdict.qualifies && !force {
+                eprintln!("Error: Contribution analysis failed and --force was not used.");
+                process::exit(1);
+            }
 
             let mut chain = AuthorshipChain::load_for_file(&path)?;
             
