@@ -9,6 +9,7 @@ pub struct FileAnalysis {
     pub new_abstractions: usize, // structs/enums/traits/interfaces
     pub cyclomatic_complexity: usize,
     pub has_new_control_flow: bool,
+    pub is_test_only: bool,
 }
 
 pub fn parse_file(path: &str) -> Result<FileAnalysis, Box<dyn std::error::Error>> {
@@ -59,12 +60,53 @@ pub fn parse_file(path: &str) -> Result<FileAnalysis, Box<dyn std::error::Error>
     let complexity_matches = count_matches(&ts_language, &tree, &source_code, complexity_query_str);
     let has_new_control_flow = count_matches(&ts_language, &tree, &source_code, control_flow_query_str) > 0;
 
+    // Detect test-only files: check for #[test] attributes or test_ prefixed functions
+    let is_test_only = if function_count > 0 {
+        let test_query_str = match language_name {
+            "rust" => "(attribute_item (attribute (identifier) @attr)) @test_attr
+                       (function_item name: (identifier) @fn_name)",
+            "python" => "(function_definition name: (identifier) @fn_name)",
+            "javascript" | "typescript" => "(function_declaration name: (identifier) @fn_name)",
+            _ => "(function_definition name: (identifier) @fn_name)",
+        };
+        let query = Query::new(&ts_language, test_query_str).expect("Invalid test query");
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, tree.root_node(), source_code.as_bytes());
+
+        let mut total_functions = 0;
+        let mut test_functions = 0;
+        let mut has_test_attr = false;
+
+        while let Some(m) = matches.next() {
+            for capture in m.captures {
+                let name = query.capture_names()[capture.index as usize];
+                let node = capture.node;
+                let text = node.utf8_text(source_code.as_bytes()).unwrap_or("");
+
+                if name == "test_attr" && text == "test" {
+                    has_test_attr = true;
+                } else if name == "fn_name" {
+                    total_functions += 1;
+                    if text.starts_with("test_") || text.contains("test") {
+                        test_functions += 1;
+                    }
+                }
+            }
+        }
+
+        // Test-only if: has #[test] attr, OR all functions are test-prefixed
+        has_test_attr || (total_functions > 0 && test_functions == total_functions)
+    } else {
+        false
+    };
+
     Ok(FileAnalysis {
         language: language_name.to_string(),
         function_count,
         new_abstractions,
         cyclomatic_complexity: 1 + complexity_matches,
         has_new_control_flow,
+        is_test_only,
     })
 }
 
@@ -77,4 +119,255 @@ fn count_matches(language: &Language, tree: &tree_sitter::Tree, source_code: &st
         count += 1;
     }
     count
+}
+
+pub struct LogicReport {
+    pub high_complexity_functions: usize,  // functions with complexity > 3
+    pub control_flow_count: usize,         // if/match/loop/while nodes
+    pub error_handling_count: usize,       // Result/Option/try usage
+    pub logic_present: bool,               // true if any of the above > 0
+}
+
+pub struct ArchitectureReport {
+    pub new_structs_enums_traits: usize,   // struct/enum/trait/impl definitions
+    pub new_modules: usize,                // mod declarations
+    pub architecture_present: bool,        // true if any of the above > 0
+}
+
+pub fn detect_logic(tree: &tree_sitter::Tree, source: &str) -> LogicReport {
+    let root = tree.root_node();
+    let mut high_complexity_functions = 0;
+    let mut control_flow_count = 0;
+    let mut error_handling_count = 0;
+
+    // Count control flow nodes (if/match/loop/while)
+    let control_flow_query = Query::new(
+        &tree.language(),
+        "(if_expression) @cf (match_expression) @cf (for_expression) @cf (while_expression) @cf (loop_expression) @cf",
+    ).expect("Invalid control flow query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&control_flow_query, root, source.as_bytes());
+    while let Some(_) = matches.next() {
+        control_flow_count += 1;
+    }
+
+    // Count error handling (Result/Option/try)
+    let error_handling_query = Query::new(
+        &tree.language(),
+        "(generic_type (type_identifier) @t) @gt
+         (primitive_type) @prim
+         (try_expression) @try",
+    ).expect("Invalid error handling query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&error_handling_query, root, source.as_bytes());
+    while let Some(m) = matches.next() {
+        for capture in m.captures {
+            let name = error_handling_query.capture_names()[capture.index as usize];
+            let node = capture.node;
+            let text = node.utf8_text(source.as_bytes()).unwrap_or("");
+            if name == "t" && (text == "Result" || text == "Option") {
+                error_handling_count += 1;
+            } else if name == "try" {
+                error_handling_count += 1;
+            }
+        }
+    }
+
+    // Count functions with complexity > 3
+    let function_query = Query::new(
+        &tree.language(),
+        "(function_item name: (identifier) @fn_name body: (block) @fn_body)",
+    ).expect("Invalid function query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&function_query, root, source.as_bytes());
+    while let Some(m) = matches.next() {
+        let mut complexity = 1;
+        for capture in m.captures {
+            let name = function_query.capture_names()[capture.index as usize];
+            if name == "fn_body" {
+                let body = capture.node;
+                // Count control flow within function body
+                let cf_query = Query::new(
+                    &tree.language(),
+                    "(if_expression) @if (match_expression) @match (for_expression) @for (while_expression) @while (loop_expression) @loop)",
+                ).expect("Invalid cf query");
+                let mut cf_cursor = QueryCursor::new();
+                let mut cf_matches = cf_cursor.matches(&cf_query, body, source.as_bytes());
+                while let Some(_) = cf_matches.next() {
+                    complexity += 1;
+                }
+            }
+        }
+        if complexity > 3 {
+            high_complexity_functions += 1;
+        }
+    }
+
+    let logic_present = control_flow_count > 0 || high_complexity_functions > 0 || error_handling_count > 0;
+
+    LogicReport {
+        high_complexity_functions,
+        control_flow_count,
+        error_handling_count,
+        logic_present,
+    }
+}
+
+pub fn detect_architecture(tree: &tree_sitter::Tree, source: &str) -> ArchitectureReport {
+    let root = tree.root_node();
+    let mut new_structs_enums_traits = 0;
+    let mut new_modules = 0;
+
+    // Count struct/enum/trait/impl definitions
+    let architecture_query = Query::new(
+        &tree.language(),
+        "(struct_item) @struct (enum_item) @enum (trait_item) @trait (impl_item) @impl)",
+    ).expect("Invalid architecture query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&architecture_query, root, source.as_bytes());
+    while let Some(_) = matches.next() {
+        new_structs_enums_traits += 1;
+    }
+
+    // Count mod declarations
+    let module_query = Query::new(
+        &tree.language(),
+        "(mod_item) @mod",
+    ).expect("Invalid module query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&module_query, root, source.as_bytes());
+    while let Some(_) = matches.next() {
+        new_modules += 1;
+    }
+
+    let architecture_present = new_structs_enums_traits > 0 || new_modules > 0;
+
+    ArchitectureReport {
+        new_structs_enums_traits,
+        new_modules,
+        architecture_present,
+    }
+}
+
+pub struct ContributionVerdict {
+    pub qualifies: bool,
+    pub score: f32,
+    pub reason: String,
+}
+
+pub fn score_contribution(
+    analysis: &FileAnalysis,
+    logic: &LogicReport,
+    arch: &ArchitectureReport,
+) -> ContributionVerdict {
+    // Supported file extensions for etch contributions
+    const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "py", "ts", "js", "go", "cpp", "c", "java"];
+
+    // HARD DISQUALIFIER 1: Unsupported file extension
+    if !SUPPORTED_EXTENSIONS.contains(&analysis.language.as_str()) {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "unsupported file type".to_string(),
+        };
+    }
+
+    // HARD DISQUALIFIER 2: No logic or architecture detected
+    if !logic.logic_present && !arch.architecture_present {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "no logic or architecture detected".to_string(),
+        };
+    }
+
+    // HARD DISQUALIFIER 3: Abstraction spam without logic
+    if arch.new_structs_enums_traits > 5 && !logic.logic_present {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "abstraction spam detected — no logic present".to_string(),
+        };
+    }
+
+    // HARD DISQUALIFIER 4: Control flow inflation without complexity
+    if logic.control_flow_count > 10 && logic.high_complexity_functions == 0 {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "control flow inflation detected".to_string(),
+        };
+    }
+
+    // HARD DISQUALIFIER 5: Test-only contribution
+    if analysis.is_test_only {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "test-only contribution does not qualify".to_string(),
+        };
+    }
+
+    // HARD DISQUALIFIER 6: Refactoring laundering (structural reorg without logic)
+    if arch.architecture_present && !logic.logic_present && arch.new_structs_enums_traits <= 3 {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "structural reorganization without new logic detected".to_string(),
+        };
+    }
+
+    // SCORING (only reached if no hard disqualifiers)
+    let mut base_score = 0.0;
+
+    // Logic presence: +0.4
+    if logic.logic_present {
+        base_score += 0.4;
+    }
+
+    // Architecture presence with scaled abstraction score (no cliff)
+    if arch.architecture_present {
+        let arch_score = (0.3 - (arch.new_structs_enums_traits.saturating_sub(1) as f32 * 0.06)).max(0.0);
+        base_score += arch_score;
+    }
+
+    // High complexity functions: +0.2
+    if logic.high_complexity_functions > 0 {
+        base_score += 0.2;
+    }
+
+    // Control flow with inflation penalty
+    if logic.control_flow_count > 0 && logic.control_flow_count <= 5 {
+        base_score += 0.1;
+    }
+    // control_flow_count > 5: +0.0 (penalize control flow inflation)
+
+    // FINAL VERDICT
+    let qualifies = base_score >= 0.6;
+    let reason = if qualifies {
+        "contribution meets etch authorship threshold".to_string()
+    } else {
+        let mut missing = Vec::new();
+        if !logic.logic_present {
+            missing.push("no substantive logic present");
+        }
+        if !arch.architecture_present {
+            missing.push("no architectural contribution");
+        } else if arch.new_structs_enums_traits > 3 {
+            missing.push("excessive abstractions reduce score");
+        }
+        if logic.high_complexity_functions == 0 {
+            missing.push("no high-complexity functions");
+        }
+        if logic.control_flow_count == 0 || logic.control_flow_count > 5 {
+            missing.push("control flow contribution missing or inflated");
+        }
+        format!("contribution falls short: {}", missing.join(", "))
+    };
+
+    ContributionVerdict {
+        qualifies,
+        score: base_score,
+        reason,
+    }
 }
