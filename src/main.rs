@@ -66,6 +66,27 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Sign { path }) => {
             let identity = EtchIdentity::load()?;
+            
+            // Contribution analysis
+            let (analysis, tree, source) = etch::analyzer::parse_file(&path)?;
+            let logic = etch::analyzer::detect_logic(&tree, &source);
+            let arch = etch::analyzer::detect_architecture(&tree, &source);
+            let verdict = etch::analyzer::score_contribution(&analysis, &logic, &arch);
+
+            println!("Contribution Analysis for: {}", path);
+            println!("- Language: {}", analysis.language);
+            println!("- Functions: {}", analysis.function_count);
+            println!("- Abstractions: {}", analysis.new_abstractions);
+            println!("- Complexity Score: {}", analysis.cyclomatic_complexity);
+            println!("- Logic Present: {}", if logic.logic_present { "Yes" } else { "No" });
+            println!("- Architecture Present: {}", if arch.architecture_present { "Yes" } else { "No" });
+            println!("- Qualifies: {}", if verdict.qualifies { "YES" } else { "NO" });
+            if !verdict.qualifies {
+                println!("- Reason: {}", verdict.reason);
+            }
+            println!("- Score: {:.2}", verdict.score);
+            println!("");
+
             let mut chain = AuthorshipChain::load_for_file(&path)?;
             
             let prev_hash = if let Some(last) = chain.fingerprints.last() {

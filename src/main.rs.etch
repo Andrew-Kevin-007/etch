@@ -1,0 +1,18 @@
+{
+  "fingerprints": [
+    {
+      "contributor_pubkey": "6ced95b978a2c36a4f77b3ba7454980a9fdc5008ab46c64825ba096063f4a5e8",
+      "timestamp": "2026-04-03T16:33:45.265970700+00:00",
+      "code_hash": "533e0e3053999d41f17dfcdc611b1b4a50d1876533080518e3d3a2fad85c075f",
+      "prev_hash": "genesis",
+      "signature": "9c33a0e825ccae4947320316e6d0c6e6259431992b38506a1042f6c12eb5c20cce2ecdf4bf673229fd8fdf2c41ec600e394c86b5e3fe414e228e8d852ec12f06"
+    },
+    {
+      "contributor_pubkey": "6ced95b978a2c36a4f77b3ba7454980a9fdc5008ab46c64825ba096063f4a5e8",
+      "timestamp": "2026-04-03T16:34:02.462106200+00:00",
+      "code_hash": "533e0e3053999d41f17dfcdc611b1b4a50d1876533080518e3d3a2fad85c075f",
+      "prev_hash": "a6c1d90d2f20e85102a665494f263eb5f5f9bb5121f60f9c8c0f5b4dd818aa3e",
+      "signature": "56b4b76ddf34147d969c4f413b315a059afd149b9006aa2c6910ba3893e840fe0738dbfd61ace7a1f94cf48508a08ed934fb18c9a950c10de44b58815dcc8e0b"
+    }
+  ]
+}

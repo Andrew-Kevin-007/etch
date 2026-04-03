@@ -10,9 +10,10 @@ pub struct FileAnalysis {
     pub cyclomatic_complexity: usize,
     pub has_new_control_flow: bool,
     pub is_test_only: bool,
+    pub has_dead_code: bool,
 }
 
-pub fn parse_file(path: &str) -> Result<FileAnalysis, Box<dyn std::error::Error>> {
+pub fn parse_file(path: &str) -> Result<(FileAnalysis, tree_sitter::Tree, String), Box<dyn std::error::Error>> {
     let extension = Path::new(path)
         .extension()
         .and_then(|ext| ext.to_str())
@@ -35,7 +36,7 @@ pub fn parse_file(path: &str) -> Result<FileAnalysis, Box<dyn std::error::Error>
 
     let (function_query_str, abstraction_query_str, complexity_query_str, control_flow_query_str) = match language_name {
         "rust" => (
-            "(function_item) @func (impl_item (function_item) @func)",
+            "(function_item) @func",
             "(struct_item) @abs (enum_item) @abs (trait_item) @abs",
             "(if_expression) @comp (match_arm) @comp (for_expression) @comp (while_expression) @comp (loop_expression) @comp",
             "(if_expression) @cf (match_expression) @cf (for_expression) @cf (while_expression) @cf (loop_expression) @cf",
@@ -59,6 +60,7 @@ pub fn parse_file(path: &str) -> Result<FileAnalysis, Box<dyn std::error::Error>
     let new_abstractions = count_matches(&ts_language, &tree, &source_code, abstraction_query_str);
     let complexity_matches = count_matches(&ts_language, &tree, &source_code, complexity_query_str);
     let has_new_control_flow = count_matches(&ts_language, &tree, &source_code, control_flow_query_str) > 0;
+    let has_dead_code = detect_dead_code(&tree, &source_code);
 
     // Detect test-only files: check for #[test] attributes or test_ prefixed functions
     let is_test_only = if function_count > 0 {
@@ -100,14 +102,15 @@ pub fn parse_file(path: &str) -> Result<FileAnalysis, Box<dyn std::error::Error>
         false
     };
 
-    Ok(FileAnalysis {
+    Ok((FileAnalysis {
         language: language_name.to_string(),
         function_count,
         new_abstractions,
         cyclomatic_complexity: 1 + complexity_matches,
         has_new_control_flow,
         is_test_only,
-    })
+        has_dead_code,
+    }, tree, source_code))
 }
 
 fn count_matches(language: &Language, tree: &tree_sitter::Tree, source_code: &str, query_str: &str) -> usize {
@@ -119,6 +122,139 @@ fn count_matches(language: &Language, tree: &tree_sitter::Tree, source_code: &st
         count += 1;
     }
     count
+}
+
+pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str) -> bool {
+    let root = tree.root_node();
+    let lang = tree.language();
+
+    // 1. Detect functions defined but never called within the same file
+    let mut defined_functions = Vec::new();
+    let mut called_functions = Vec::new();
+
+    let func_def_query = Query::new(
+        &lang,
+        "(function_item name: (identifier) @name)",
+    ).expect("Invalid function definition query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&func_def_query, root, source.as_bytes());
+    while let Some(m) = matches.next() {
+        for capture in m.captures {
+            let name = func_def_query.capture_names()[capture.index as usize];
+            if name == "name" {
+                if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                    defined_functions.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    let func_call_query = Query::new(
+        &lang,
+        "(call_expression function: (identifier) @name)",
+    ).expect("Invalid function call query");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&func_call_query, root, source.as_bytes());
+    while let Some(m) = matches.next() {
+        for capture in m.captures {
+            let name = func_call_query.capture_names()[capture.index as usize];
+            if name == "name" {
+                if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                    called_functions.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    // Check for defined but uncalled functions (excluding main and common entry points)
+    for func in &defined_functions {
+        if func != "main" && func != "new" && func != "default" && !called_functions.contains(func) {
+            return true;
+        }
+    }
+
+    // 2. Detect branches that are always true/false (if true {}, if false {})
+    let const_branch_query = Query::new(
+        &lang,
+        "(if_expression condition: (boolean_literal) @const_bool)
+         (if_statement condition: (boolean_literal) @const_bool)",
+    ).ok();
+    if let Some(query) = const_branch_query {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        if matches.next().is_some() {
+            return true;
+        }
+    }
+
+    // 3. Detect code after a return statement inside a block
+    let unreachable_query = Query::new(
+        &lang,
+        "(block (expression_statement) @stmt
+                (return_expression) @ret
+                (_) @after)",
+    ).ok();
+    if let Some(query) = unreachable_query {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        if matches.next().is_some() {
+            return true;
+        }
+    }
+
+    // 4. Detect variables assigned but never read
+    let var_assign_query = Query::new(
+        &lang,
+        "[(let_declaration pattern: (identifier) @var)
+          (let_statement pattern: (identifier) @var)
+          (assignment_expression left: (identifier) @var)]",
+    ).ok();
+    let var_read_query = Query::new(
+        &lang,
+        "(identifier) @var",
+    ).ok();
+
+    if let (Some(aq), Some(rq)) = (var_assign_query, var_read_query) {
+        let mut assigned_vars: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut read_vars: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&aq, root, source.as_bytes());
+        while let Some(m) = matches.next() {
+            for capture in m.captures {
+                let name = aq.capture_names()[capture.index as usize];
+                if name == "var" {
+                    if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                        *assigned_vars.entry(text.to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&rq, root, source.as_bytes());
+        while let Some(m) = matches.next() {
+            for capture in m.captures {
+                let name = rq.capture_names()[capture.index as usize];
+                if name == "var" {
+                    if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                        *read_vars.entry(text.to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        // Check for assigned but unread variables
+        for (var, assign_count) in &assigned_vars {
+            let read_count = read_vars.get(var).copied().unwrap_or(0);
+            // If assigned more times than read, likely dead code
+            if assign_count > &read_count {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 pub struct LogicReport {
@@ -189,7 +325,7 @@ pub fn detect_logic(tree: &tree_sitter::Tree, source: &str) -> LogicReport {
                 // Count control flow within function body
                 let cf_query = Query::new(
                     &tree.language(),
-                    "(if_expression) @if (match_expression) @match (for_expression) @for (while_expression) @while (loop_expression) @loop)",
+                    "(if_expression) @if (match_expression) @match (for_expression) @for (while_expression) @while (loop_expression) @loop",
                 ).expect("Invalid cf query");
                 let mut cf_cursor = QueryCursor::new();
                 let mut cf_matches = cf_cursor.matches(&cf_query, body, source.as_bytes());
@@ -221,7 +357,7 @@ pub fn detect_architecture(tree: &tree_sitter::Tree, source: &str) -> Architectu
     // Count struct/enum/trait/impl definitions
     let architecture_query = Query::new(
         &tree.language(),
-        "(struct_item) @struct (enum_item) @enum (trait_item) @trait (impl_item) @impl)",
+        "(struct_item) @struct (enum_item) @enum (trait_item) @trait (impl_item) @impl",
     ).expect("Invalid architecture query");
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&architecture_query, root, source.as_bytes());
@@ -261,7 +397,7 @@ pub fn score_contribution(
     arch: &ArchitectureReport,
 ) -> ContributionVerdict {
     // Supported file extensions for etch contributions
-    const SUPPORTED_EXTENSIONS: &[&str] = &["rs", "py", "ts", "js", "go", "cpp", "c", "java"];
+    const SUPPORTED_EXTENSIONS: &[&str] = &["rust", "rs", "py", "ts", "js", "go", "cpp", "c", "java"];
 
     // HARD DISQUALIFIER 1: Unsupported file extension
     if !SUPPORTED_EXTENSIONS.contains(&analysis.language.as_str()) {
@@ -299,7 +435,16 @@ pub fn score_contribution(
         };
     }
 
-    // HARD DISQUALIFIER 5: Test-only contribution
+    // HARD DISQUALIFIER 5: Dead code / unreachable complexity
+    if analysis.has_dead_code {
+        return ContributionVerdict {
+            qualifies: false,
+            score: 0.0,
+            reason: "unreachable or dead code detected — contribution must contain only executable logic".to_string(),
+        };
+    }
+
+    // HARD DISQUALIFIER 6: Test-only contribution
     if analysis.is_test_only {
         return ContributionVerdict {
             qualifies: false,
@@ -308,7 +453,7 @@ pub fn score_contribution(
         };
     }
 
-    // HARD DISQUALIFIER 6: Refactoring laundering (structural reorg without logic)
+    // HARD DISQUALIFIER 7: Refactoring laundering (structural reorg without logic)
     if arch.architecture_present && !logic.logic_present && arch.new_structs_enums_traits <= 3 {
         return ContributionVerdict {
             qualifies: false,
