@@ -60,7 +60,7 @@ pub fn parse_file(path: &str) -> Result<(FileAnalysis, tree_sitter::Tree, String
     let new_abstractions = count_matches(&ts_language, &tree, &source_code, abstraction_query_str);
     let complexity_matches = count_matches(&ts_language, &tree, &source_code, complexity_query_str);
     let has_new_control_flow = count_matches(&ts_language, &tree, &source_code, control_flow_query_str) > 0;
-    let has_dead_code = detect_dead_code(&tree, &source_code);
+    let has_dead_code = detect_dead_code(&tree, &source_code, language_name);
 
     // Detect test-only files: check for #[test] attributes or test_ prefixed functions
     let is_test_only = if function_count > 0 {
@@ -71,33 +71,36 @@ pub fn parse_file(path: &str) -> Result<(FileAnalysis, tree_sitter::Tree, String
             "javascript" | "typescript" => "(function_declaration name: (identifier) @fn_name)",
             _ => "(function_definition name: (identifier) @fn_name)",
         };
-        let query = Query::new(&ts_language, test_query_str).expect("Invalid test query");
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&query, tree.root_node(), source_code.as_bytes());
+        if let Ok(query) = Query::new(&ts_language, test_query_str) {
+            let mut cursor = QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), source_code.as_bytes());
 
-        let mut total_functions = 0;
-        let mut test_functions = 0;
-        let mut has_test_attr = false;
+            let mut total_functions = 0;
+            let mut test_functions = 0;
+            let mut has_test_attr = false;
 
-        while let Some(m) = matches.next() {
-            for capture in m.captures {
-                let name = query.capture_names()[capture.index as usize];
-                let node = capture.node;
-                let text = node.utf8_text(source_code.as_bytes()).unwrap_or("");
+            while let Some(m) = matches.next() {
+                for capture in m.captures {
+                    let name = query.capture_names()[capture.index as usize];
+                    let node = capture.node;
+                    let text = node.utf8_text(source_code.as_bytes()).unwrap_or("");
 
-                if name == "test_attr" && text == "test" {
-                    has_test_attr = true;
-                } else if name == "fn_name" {
-                    total_functions += 1;
-                    if text.starts_with("test_") || text.contains("test") {
-                        test_functions += 1;
+                    if name == "test_attr" && text == "test" {
+                        has_test_attr = true;
+                    } else if name == "fn_name" {
+                        total_functions += 1;
+                        if text.starts_with("test_") || text.contains("test") {
+                            test_functions += 1;
+                        }
                     }
                 }
             }
-        }
 
-        // Test-only if: has #[test] attr, OR all functions are test-prefixed
-        has_test_attr || (total_functions > 0 && test_functions == total_functions)
+            // Test-only if: has #[test] attr, OR all functions are test-prefixed
+            has_test_attr || (total_functions > 0 && test_functions == total_functions)
+        } else {
+            false
+        }
     } else {
         false
     };
@@ -114,7 +117,10 @@ pub fn parse_file(path: &str) -> Result<(FileAnalysis, tree_sitter::Tree, String
 }
 
 fn count_matches(language: &Language, tree: &tree_sitter::Tree, source_code: &str, query_str: &str) -> usize {
-    let query = Query::new(language, query_str).expect("Invalid query");
+    let query = match Query::new(language, query_str) {
+        Ok(q) => q,
+        Err(_) => return 0,
+    };
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&query, tree.root_node(), source_code.as_bytes());
     let mut count = 0;
@@ -124,7 +130,7 @@ fn count_matches(language: &Language, tree: &tree_sitter::Tree, source_code: &st
     count
 }
 
-pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str) -> bool {
+pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str, language: &str) -> bool {
     let root = tree.root_node();
     let lang = tree.language();
 
@@ -132,35 +138,43 @@ pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str) -> bool {
     let mut defined_functions = Vec::new();
     let mut called_functions = Vec::new();
 
-    let func_def_query = Query::new(
-        &lang,
-        "(function_item name: (identifier) @name)",
-    ).expect("Invalid function definition query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&func_def_query, root, source.as_bytes());
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            let name = func_def_query.capture_names()[capture.index as usize];
-            if name == "name" {
-                if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
-                    defined_functions.push(text.to_string());
+    let func_def_query_str = match language {
+        "rust" => "(function_item name: (identifier) @name)",
+        "python" => "(function_definition name: (identifier) @name)",
+        "javascript" | "typescript" => "(function_declaration name: (identifier) @name)",
+        _ => "(function_definition name: (identifier) @name)",
+    };
+
+    if let Ok(query) = Query::new(&lang, func_def_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(m) = matches.next() {
+            for capture in m.captures {
+                let name = query.capture_names()[capture.index as usize];
+                if name == "name" {
+                    if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                        defined_functions.push(text.to_string());
+                    }
                 }
             }
         }
     }
 
-    let func_call_query = Query::new(
-        &lang,
-        "(call_expression function: (identifier) @name)",
-    ).expect("Invalid function call query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&func_call_query, root, source.as_bytes());
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            let name = func_call_query.capture_names()[capture.index as usize];
-            if name == "name" {
-                if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
-                    called_functions.push(text.to_string());
+    let func_call_query_str = match language {
+        "rust" | "python" | "javascript" | "typescript" => "(call_expression function: (identifier) @name)",
+        _ => "(call_expression function: (identifier) @name)",
+    };
+
+    if let Ok(query) = Query::new(&lang, func_call_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(m) = matches.next() {
+            for capture in m.captures {
+                let name = query.capture_names()[capture.index as usize];
+                if name == "name" {
+                    if let Ok(text) = capture.node.utf8_text(source.as_bytes()) {
+                        called_functions.push(text.to_string());
+                    }
                 }
             }
         }
@@ -174,12 +188,13 @@ pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str) -> bool {
     }
 
     // 2. Detect branches that are always true/false (if true {}, if false {})
-    let const_branch_query = Query::new(
-        &lang,
-        "(if_expression condition: (boolean_literal) @const_bool)
-         (if_statement condition: (boolean_literal) @const_bool)",
-    ).ok();
-    if let Some(query) = const_branch_query {
+    let const_branch_query_str = match language {
+        "rust" => "(if_expression condition: (boolean_literal) @const_bool)",
+        "python" | "javascript" | "typescript" => "(if_statement condition: (boolean_literal) @const_bool)",
+        _ => "(if_statement condition: (boolean_literal) @const_bool)",
+    };
+
+    if let Ok(query) = Query::new(&lang, const_branch_query_str) {
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(&query, root, source.as_bytes());
         if matches.next().is_some() {
@@ -188,13 +203,14 @@ pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str) -> bool {
     }
 
     // 3. Detect code after a return statement inside a block
-    let unreachable_query = Query::new(
-        &lang,
-        "(block (expression_statement) @stmt
-                (return_expression) @ret
-                (_) @after)",
-    ).ok();
-    if let Some(query) = unreachable_query {
+    let unreachable_query_str = match language {
+        "rust" => "(block (expression_statement) @stmt (return_expression) @ret (_) @after)",
+        "python" => "(block (expression_statement) @stmt (return_statement) @ret (_) @after)",
+        "javascript" | "typescript" => "(statement_block (expression_statement) @stmt (return_statement) @ret (_) @after)",
+        _ => "(block (expression_statement) @stmt (return_statement) @ret (_) @after)",
+    };
+
+    if let Ok(query) = Query::new(&lang, unreachable_query_str) {
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(&query, root, source.as_bytes());
         if matches.next().is_some() {
@@ -203,16 +219,15 @@ pub fn detect_dead_code(tree: &tree_sitter::Tree, source: &str) -> bool {
     }
 
     // 4. Detect variables assigned but never read
-    let var_assign_query = Query::new(
-        &lang,
-        "[(let_declaration pattern: (identifier) @var)
-          (let_statement pattern: (identifier) @var)
-          (assignment_expression left: (identifier) @var)]",
-    ).ok();
-    let var_read_query = Query::new(
-        &lang,
-        "(identifier) @var",
-    ).ok();
+    let var_assign_query_str = match language {
+        "rust" => "[(let_declaration pattern: (identifier) @var) (let_statement pattern: (identifier) @var) (assignment_expression left: (identifier) @var)]",
+        "python" => "(assignment left: (identifier) @var)",
+        "javascript" | "typescript" => "[(lexical_declaration (variable_declarator name: (identifier) @var)) (variable_declaration (variable_declarator name: (identifier) @var)) (assignment_expression left: (identifier) @var)]",
+        _ => "[(assignment_expression left: (identifier) @var)]",
+    };
+
+    let var_assign_query = Query::new(&lang, var_assign_query_str).ok();
+    let var_read_query = Query::new(&lang, "(identifier) @var").ok();
 
     if let (Some(aq), Some(rq)) = (var_assign_query, var_read_query) {
         let mut assigned_vars: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -270,72 +285,99 @@ pub struct ArchitectureReport {
     pub architecture_present: bool,        // true if any of the above > 0
 }
 
-pub fn detect_logic(tree: &tree_sitter::Tree, source: &str) -> LogicReport {
+pub fn detect_logic(tree: &tree_sitter::Tree, source: &str, language: &str) -> LogicReport {
     let root = tree.root_node();
     let mut high_complexity_functions = 0;
     let mut control_flow_count = 0;
     let mut error_handling_count = 0;
 
     // Count control flow nodes (if/match/loop/while)
-    let control_flow_query = Query::new(
-        &tree.language(),
-        "(if_expression) @cf (match_expression) @cf (for_expression) @cf (while_expression) @cf (loop_expression) @cf",
-    ).expect("Invalid control flow query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&control_flow_query, root, source.as_bytes());
-    while let Some(_) = matches.next() {
-        control_flow_count += 1;
+    let control_flow_query_str = match language {
+        "rust" => "(if_expression) @cf (match_expression) @cf (for_expression) @cf (while_expression) @cf (loop_expression) @cf",
+        "python" => "(if_statement) @cf (for_statement) @cf (while_statement) @cf",
+        "javascript" | "typescript" => "(if_statement) @cf (for_statement) @cf (while_statement) @cf (switch_statement) @cf",
+        _ => "(if_statement) @cf (for_statement) @cf (while_statement) @cf",
+    };
+
+    if let Ok(query) = Query::new(&tree.language(), control_flow_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(_) = matches.next() {
+            control_flow_count += 1;
+        }
     }
 
     // Count error handling (Result/Option/try)
-    let error_handling_query = Query::new(
-        &tree.language(),
-        "(generic_type (type_identifier) @t) @gt
-         (primitive_type) @prim
-         (try_expression) @try",
-    ).expect("Invalid error handling query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&error_handling_query, root, source.as_bytes());
-    while let Some(m) = matches.next() {
-        for capture in m.captures {
-            let name = error_handling_query.capture_names()[capture.index as usize];
-            let node = capture.node;
-            let text = node.utf8_text(source.as_bytes()).unwrap_or("");
-            if name == "t" && (text == "Result" || text == "Option") {
-                error_handling_count += 1;
-            } else if name == "try" {
-                error_handling_count += 1;
+    let error_handling_query_str = match language {
+        "rust" => "(generic_type (type_identifier) @t) @gt (primitive_type) @prim (try_expression) @try",
+        "python" => "(try_statement) @try",
+        "javascript" | "typescript" => "(try_statement) @try",
+        _ => "(try_statement) @try",
+    };
+
+    if let Ok(query) = Query::new(&tree.language(), error_handling_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(m) = matches.next() {
+            for capture in m.captures {
+                let name = query.capture_names()[capture.index as usize];
+                let node = capture.node;
+                let text = node.utf8_text(source.as_bytes()).unwrap_or("");
+                if name == "t" && (text == "Result" || text == "Option") {
+                    error_handling_count += 1;
+                } else if name == "try" {
+                    error_handling_count += 1;
+                }
             }
         }
     }
 
     // Count functions with complexity > 3
-    let function_query = Query::new(
-        &tree.language(),
-        "(function_item name: (identifier) @fn_name body: (block) @fn_body)",
-    ).expect("Invalid function query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&function_query, root, source.as_bytes());
-    while let Some(m) = matches.next() {
-        let mut complexity = 1;
-        for capture in m.captures {
-            let name = function_query.capture_names()[capture.index as usize];
-            if name == "fn_body" {
-                let body = capture.node;
-                // Count control flow within function body
-                let cf_query = Query::new(
-                    &tree.language(),
-                    "(if_expression) @if (match_expression) @match (for_expression) @for (while_expression) @while (loop_expression) @loop",
-                ).expect("Invalid cf query");
-                let mut cf_cursor = QueryCursor::new();
-                let mut cf_matches = cf_cursor.matches(&cf_query, body, source.as_bytes());
-                while let Some(_) = cf_matches.next() {
-                    complexity += 1;
+    let (function_query_str, body_name, cf_query_str) = match language {
+        "rust" => (
+            "(function_item name: (identifier) @fn_name body: (block) @fn_body)",
+            "fn_body",
+            "(if_expression) @if (match_expression) @match (for_expression) @for (while_expression) @while (loop_expression) @loop",
+        ),
+        "python" => (
+            "(function_definition name: (identifier) @fn_name body: (block) @fn_body)",
+            "fn_body",
+            "(if_statement) @if (for_statement) @for (while_statement) @while",
+        ),
+        "javascript" | "typescript" => (
+            "(function_declaration name: (identifier) @fn_name body: (statement_block) @fn_body)",
+            "fn_body",
+            "(if_statement) @if (for_statement) @for (while_statement) @while (switch_statement) @switch",
+        ),
+        _ => (
+            "(function_definition name: (identifier) @fn_name body: (block) @fn_body)",
+            "fn_body",
+            "(if_statement) @if (for_statement) @for (while_statement) @while",
+        ),
+    };
+
+    if let Ok(query) = Query::new(&tree.language(), function_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(m) = matches.next() {
+            let mut complexity = 1;
+            for capture in m.captures {
+                let name = query.capture_names()[capture.index as usize];
+                if name == body_name {
+                    let body = capture.node;
+                    // Count control flow within function body
+                    if let Ok(cf_query) = Query::new(&tree.language(), cf_query_str) {
+                        let mut cf_cursor = QueryCursor::new();
+                        let mut cf_matches = cf_cursor.matches(&cf_query, body, source.as_bytes());
+                        while let Some(_) = cf_matches.next() {
+                            complexity += 1;
+                        }
+                    }
                 }
             }
-        }
-        if complexity > 3 {
-            high_complexity_functions += 1;
+            if complexity > 3 {
+                high_complexity_functions += 1;
+            }
         }
     }
 
@@ -349,31 +391,41 @@ pub fn detect_logic(tree: &tree_sitter::Tree, source: &str) -> LogicReport {
     }
 }
 
-pub fn detect_architecture(tree: &tree_sitter::Tree, source: &str) -> ArchitectureReport {
+pub fn detect_architecture(tree: &tree_sitter::Tree, source: &str, language: &str) -> ArchitectureReport {
     let root = tree.root_node();
     let mut new_structs_enums_traits = 0;
     let mut new_modules = 0;
 
     // Count struct/enum/trait/impl definitions
-    let architecture_query = Query::new(
-        &tree.language(),
-        "(struct_item) @struct (enum_item) @enum (trait_item) @trait (impl_item) @impl",
-    ).expect("Invalid architecture query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&architecture_query, root, source.as_bytes());
-    while let Some(_) = matches.next() {
-        new_structs_enums_traits += 1;
+    let architecture_query_str = match language {
+        "rust" => "(struct_item) @struct (enum_item) @enum (trait_item) @trait (impl_item) @impl",
+        "python" => "(class_definition) @class",
+        "javascript" | "typescript" => "(class_declaration) @class (interface_declaration) @interface (enum_declaration) @enum",
+        _ => "(class_definition) @class",
+    };
+
+    if let Ok(query) = Query::new(&tree.language(), architecture_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(_) = matches.next() {
+            new_structs_enums_traits += 1;
+        }
     }
 
     // Count mod declarations
-    let module_query = Query::new(
-        &tree.language(),
-        "(mod_item) @mod",
-    ).expect("Invalid module query");
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&module_query, root, source.as_bytes());
-    while let Some(_) = matches.next() {
-        new_modules += 1;
+    let module_query_str = match language {
+        "rust" => "(mod_item) @mod",
+        "python" => "(import_statement) @mod (import_from_statement) @mod",
+        "javascript" | "typescript" => "(import_statement) @mod",
+        _ => "(import_statement) @mod",
+    };
+
+    if let Ok(query) = Query::new(&tree.language(), module_query_str) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, root, source.as_bytes());
+        while let Some(_) = matches.next() {
+            new_modules += 1;
+        }
     }
 
     let architecture_present = new_structs_enums_traits > 0 || new_modules > 0;
@@ -397,7 +449,7 @@ pub fn score_contribution(
     arch: &ArchitectureReport,
 ) -> ContributionVerdict {
     // Supported file extensions for etch contributions
-    const SUPPORTED_EXTENSIONS: &[&str] = &["rust", "rs", "py", "ts", "js", "go", "cpp", "c", "java"];
+    const SUPPORTED_EXTENSIONS: &[&str] = &["rust", "python", "javascript", "typescript", "go", "cpp", "c", "java"];
 
     // HARD DISQUALIFIER 1: Unsupported file extension
     if !SUPPORTED_EXTENSIONS.contains(&analysis.language.as_str()) {

@@ -173,8 +173,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let logic = etch::analyzer::detect_logic(&tree, &source);
-            let arch = etch::analyzer::detect_architecture(&tree, &source);
+            let logic = etch::analyzer::detect_logic(&tree, &source, &analysis.language);
+            let arch = etch::analyzer::detect_architecture(&tree, &source, &analysis.language);
             let verdict = etch::analyzer::score_contribution(&analysis, &logic, &arch);
 
             println!("Contribution Analysis for: {}", path);

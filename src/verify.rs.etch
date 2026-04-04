@@ -1,0 +1,16 @@
+{
+  "fingerprints": [
+    {
+      "contributor_pubkey": "5450ba814bc0ffdbd1c2bd68e8496e515a6ac66424730d01cb6e6df450fff6d3",
+      "timestamp": "2026-04-04T14:18:01.932815300+00:00",
+      "code_hash": "0c60134f3fe507500ab92de8e262bd26f2a08ef0bd079a0b1ee31c4c4b5ef6af",
+      "prev_hash": "genesis",
+      "metadata": {
+        "domain": "cryptography",
+        "name": "Verifier",
+        "project": "etch"
+      },
+      "signature": "1fa45f577fc088f2fec219bd9d9a0d83836b4488e00d92b95e5c0ec140d488f8fe7f089f8cc155c881446b99658f215616832d4abb96faab0579ff1da8348f0a"
+    }
+  ]
+}
