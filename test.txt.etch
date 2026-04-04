@@ -20,6 +20,18 @@
       "code_hash": "32f5d4318d07b33ceac051f724144ff5cb6bbcb3ee22289f0fd0a3d6e376b82a",
       "prev_hash": "f27f5d5be0a3447e460e9cbaa2c26e2b1f8d08ccdd842506872ec59fc243ab64",
       "signature": "1f7c5a791574d48d698cfd8cea64292e4817bfda72951da0440fea30a53e948af37808c6542c6c002b16b280826cf54ee3125b33fa37277aa77590d4b7dc3f01"
+    },
+    {
+      "contributor_pubkey": "5450ba814bc0ffdbd1c2bd68e8496e515a6ac66424730d01cb6e6df450fff6d3",
+      "timestamp": "2026-04-04T16:07:03.025368800+00:00",
+      "code_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "prev_hash": "a0607a2a112c3797a396137cdf1a75eb90874c5ea2614789afe2e1fb3d0d515e",
+      "metadata": {
+        "name": "test.txt",
+        "project": "unknown",
+        "domain": "unknown"
+      },
+      "signature": "ae71d93bb995bcd12a06302037e5aefc288d2d47893a42f3084eda4e03d6cffb2fcc0a826544bab9788134e9d2d26d3047f51f8dcef56433bec29ef09373940d"
     }
   ]
 }

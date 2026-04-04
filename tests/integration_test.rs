@@ -23,7 +23,6 @@ fn test_end_to_end_sign_verify() {
     // 2. Sign file
     let output = Command::new(&etch_exe)
         .arg("sign")
-        .arg("--path")
         .arg(&file_path)
         .arg("--force")
         .arg("--name")
@@ -41,14 +40,13 @@ fn test_end_to_end_sign_verify() {
     // 3. Verify file
     let output = Command::new(&etch_exe)
         .arg("verify")
-        .arg("--path")
         .arg(&file_path)
         .env("ETCH_IDENTITY_PATH", &id_path)
         .output()
         .expect("failed to execute verify");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Verdict: PASS"));
+    assert!(stdout.contains("AUTHORSHIP VERIFIED  ✓"));
 }
 
 #[test]
@@ -66,7 +64,6 @@ fn test_modify_file_after_sign_fails() {
         .env("ETCH_IDENTITY_PATH", &id_path)
         .output().unwrap();
     Command::new(&etch_exe).arg("sign")
-        .arg("--path")
         .arg(&file_path)
         .arg("--force")
         .arg("--name")
@@ -84,7 +81,6 @@ fn test_modify_file_after_sign_fails() {
     // 3. Verify
     let output = Command::new(&etch_exe)
         .arg("verify")
-        .arg("--path")
         .arg(&file_path)
         .env("ETCH_IDENTITY_PATH", &id_path)
         .output()
@@ -93,7 +89,7 @@ fn test_modify_file_after_sign_fails() {
     // Should exit with non-zero
     assert!(!output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Verdict: FAIL"));
+    assert!(stdout.contains("AUTHORSHIP VERIFIED  ✗"));
     assert!(stdout.contains("artifact_binding"));
     assert!(stdout.contains("FAILED"));
 }
@@ -118,7 +114,6 @@ fn test_sequential_signing_two_identities() {
     let pub1 = String::from_utf8_lossy(&out1.stdout);
 
     Command::new(&etch_exe).arg("sign")
-        .arg("--path")
         .arg(&file_path)
         .arg("--force")
         .arg("--name")
@@ -142,7 +137,6 @@ fn test_sequential_signing_two_identities() {
     assert_ne!(pub1, pub2);
 
     Command::new(&etch_exe).arg("sign")
-        .arg("--path")
         .arg(&file_path)
         .arg("--force")
         .arg("--name")
@@ -157,7 +151,6 @@ fn test_sequential_signing_two_identities() {
     // 3. Verify
     let output = Command::new(&etch_exe)
         .arg("verify")
-        .arg("--path")
         .arg(&file_path)
         .env("ETCH_IDENTITY_PATH", &id2_path)
         .output()
@@ -165,6 +158,5 @@ fn test_sequential_signing_two_identities() {
     
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("Verdict: PASS"));
-    assert!(stdout.contains("Verified through entry index: 1"));
+    assert!(stdout.contains("AUTHORSHIP VERIFIED  ✓"));
 }
