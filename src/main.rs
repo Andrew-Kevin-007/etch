@@ -149,14 +149,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             
             // Server verification
             let rt = tokio::runtime::Runtime::new()?;
-            let head_hash = if let Ok(chain) = AuthorshipChain::load_for_file(&path) {
-                chain.fingerprints.last().map(|f| f.code_hash.clone())
-            } else {
-                None
-            };
-
-            let server_match = if let Some(hash) = head_hash {
-                rt.block_on(etch::notary::verify_with_server(&path, &hash)).unwrap_or(false)
+            let server_match = if let Ok(chain) = AuthorshipChain::load_for_file(&path) {
+                rt.block_on(etch::notary::verify_with_server(&path, &chain)).unwrap_or(false)
             } else {
                 false
             };

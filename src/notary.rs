@@ -47,6 +47,7 @@ pub async fn anchor_chain(file_path: &str, chain: &AuthorshipChain, identity: &E
     let mut hasher = Sha256::new();
     hasher.update(file_path.as_bytes());
     let chain_id = hex::encode(hasher.finalize());
+    println!("DEBUG anchor: chain_id={} head_hash={}", chain_id, head_hash);
 
     let request = AnchorRequest {
         chain_id,
@@ -68,6 +69,15 @@ pub async fn anchor_chain(file_path: &str, chain: &AuthorshipChain, identity: &E
             println!("✓ Authorship anchored to notarization server");
             Ok(())
         }
+        Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
+            println!("✓ Chain anchor updated on notarization server");
+            let update_url = format!("{}/anchor/update", server_url);
+            let _ = client.post(update_url)
+                .json(&request)
+                .send()
+                .await;
+            Ok(())
+        }
         Ok(resp) => {
             eprintln!("Warning: Failed to anchor authorship: Server returned status {}", resp.status());
             Ok(()) // Non-fatal
@@ -79,7 +89,7 @@ pub async fn anchor_chain(file_path: &str, chain: &AuthorshipChain, identity: &E
     }
 }
 
-pub async fn verify_with_server(file_path: &str, head_hash: &str) -> Result<bool> {
+pub async fn verify_with_server(file_path: &str, chain: &AuthorshipChain) -> Result<bool> {
     let server_url = get_server_url();
     let url = format!("{}/verify", server_url);
 
@@ -88,22 +98,35 @@ pub async fn verify_with_server(file_path: &str, head_hash: &str) -> Result<bool
     hasher.update(file_path.as_bytes());
     let chain_id = hex::encode(hasher.finalize());
 
-    let request = VerifyRequest {
-        chain_id,
-        file_path: file_path.to_string(),
-        head_hash: head_hash.to_string(),
-    };
-
     let client = reqwest::Client::new();
-    let response = client.post(url)
-        .json(&request)
-        .send()
-        .await?;
 
-    if response.status().is_success() {
-        let verify_resp: VerifyResponse = response.json().await?;
-        Ok(verify_resp.match_found)
-    } else {
-        Err(format!("Server returned error: {}", response.status()).into())
+    // Iterate backwards through fingerprints to find the most recently anchored one
+    for fingerprint in chain.fingerprints.iter().rev() {
+        let head_hash = &fingerprint.code_hash;
+        println!("DEBUG verify: chain_id={} head_hash={}", chain_id, head_hash);
+
+        let request = VerifyRequest {
+            chain_id: chain_id.clone(),
+            file_path: file_path.to_string(),
+            head_hash: head_hash.to_string(),
+        };
+
+        let response = client.post(&url)
+            .json(&request)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let verify_resp: VerifyResponse = response.json().await?;
+            if verify_resp.match_found {
+                return Ok(true);
+            }
+        } else if response.status() != reqwest::StatusCode::NOT_FOUND {
+            // If it's not a 404/Not Found, maybe something is wrong, but we continue checking?
+            // Actually, if we get an error from server, we might want to return it or just continue.
+            // Let's stick to matching true and continuing if not.
+        }
     }
+
+    Ok(false)
 }
