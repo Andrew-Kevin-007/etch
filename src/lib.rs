@@ -5,3 +5,4 @@ pub mod fingerprint;
 pub mod chain;
 pub mod verify;
 pub mod analyzer;
+pub mod notary;

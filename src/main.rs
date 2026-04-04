@@ -78,9 +78,6 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => {
                     if force {
                         eprintln!("Warning: Contribution analysis failed: {}. Proceeding due to --force.", e);
-                        // We need some way to proceed without analysis. 
-                        // The current sign_file doesn't need analysis results, it just needs the path.
-                        // So we can just skip the analysis part.
                         
                         let mut chain = AuthorshipChain::load_for_file(&path)?;
                         let prev_hash = if let Some(last) = chain.fingerprints.last() {
@@ -94,6 +91,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         chain.save_for_file(&path)?;
                         
                         println!("File '{}' signed successfully (forced).", path);
+
+                        // Anchoring to notarization server
+                        let rt = tokio::runtime::Runtime::new()?;
+                        let _ = rt.block_on(etch::notary::anchor_chain(&path, &chain, &identity));
+
                         return Ok(());
                     } else {
                         return Err(e);
@@ -137,14 +139,43 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             chain.save_for_file(&path)?;
             
             println!("File '{}' signed successfully.", path);
+
+            // Anchoring to notarization server
+            let rt = tokio::runtime::Runtime::new()?;
+            let _ = rt.block_on(etch::notary::anchor_chain(&path, &chain, &identity));
         }
         Some(Commands::Verify { path, json }) => {
-            let report = etch::verify::verify_file(&path)?;
+            let mut report = etch::verify::verify_file(&path)?;
+            
+            // Server verification
+            let rt = tokio::runtime::Runtime::new()?;
+            let head_hash = if let Ok(chain) = AuthorshipChain::load_for_file(&path) {
+                chain.fingerprints.last().map(|f| f.code_hash.clone())
+            } else {
+                None
+            };
+
+            let server_match = if let Some(hash) = head_hash {
+                rt.block_on(etch::notary::verify_with_server(&path, &hash)).unwrap_or(false)
+            } else {
+                false
+            };
+
+            report.results.push(etch::verify::CheckResult {
+                check_id: "server_verification".to_string(),
+                status: server_match,
+                entry_index: None,
+                expected: None,
+                actual: None,
+                reason_code: if server_match { None } else { Some("server_mismatch_or_unavailable".to_string()) },
+            });
+
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!("Verification Report for: {}", path);
                 println!("Verdict: {}", if report.verdict { "PASS" } else { "FAIL" });
+                println!("Server Verified: {}", if server_match { "YES" } else { "NO" });
                 if let Some(idx) = report.verified_through_index {
                     println!("Verified through entry index: {}", idx);
                 } else {

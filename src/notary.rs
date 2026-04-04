@@ -1,0 +1,109 @@
+use crate::chain::AuthorshipChain;
+use crate::identity::EtchIdentity;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::env;
+use chrono::Utc;
+
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Serialize)]
+struct AnchorRequest {
+    chain_id: String,
+    file_path: String,
+    head_hash: String,
+    chain_depth: usize,
+    contributor_pubkey: String,
+    timestamp: String,
+}
+
+#[derive(Serialize)]
+struct VerifyRequest {
+    chain_id: String,
+    file_path: String,
+    head_hash: String,
+}
+
+#[derive(Deserialize)]
+struct VerifyResponse {
+    match_found: bool,
+}
+
+pub fn get_server_url() -> String {
+    env::var("ETCH_SERVER").unwrap_or_else(|_| "https://etch-server-production.up.railway.app".to_string())
+}
+
+pub async fn anchor_chain(file_path: &str, chain: &AuthorshipChain, identity: &EtchIdentity) -> Result<()> {
+    let server_url = get_server_url();
+    let url = format!("{}/anchor", server_url);
+
+    let head_hash = if let Some(last) = chain.fingerprints.last() {
+        last.code_hash.clone()
+    } else {
+        return Err("Cannot anchor empty chain".into());
+    };
+
+    // chain_id is SHA-256 of file_path
+    let mut hasher = Sha256::new();
+    hasher.update(file_path.as_bytes());
+    let chain_id = hex::encode(hasher.finalize());
+
+    let request = AnchorRequest {
+        chain_id,
+        file_path: file_path.to_string(),
+        head_hash,
+        chain_depth: chain.fingerprints.len(),
+        contributor_pubkey: identity.public_key_hex(),
+        timestamp: Utc::now().to_rfc3339(),
+    };
+
+    let client = reqwest::Client::new();
+    let response = client.post(url)
+        .json(&request)
+        .send()
+        .await;
+
+    match response {
+        Ok(resp) if resp.status().is_success() => {
+            println!("✓ Authorship anchored to notarization server");
+            Ok(())
+        }
+        Ok(resp) => {
+            eprintln!("Warning: Failed to anchor authorship: Server returned status {}", resp.status());
+            Ok(()) // Non-fatal
+        }
+        Err(e) => {
+            eprintln!("Warning: Failed to anchor authorship: {}", e);
+            Ok(()) // Non-fatal
+        }
+    }
+}
+
+pub async fn verify_with_server(file_path: &str, head_hash: &str) -> Result<bool> {
+    let server_url = get_server_url();
+    let url = format!("{}/verify", server_url);
+
+    // chain_id is SHA-256 of file_path
+    let mut hasher = Sha256::new();
+    hasher.update(file_path.as_bytes());
+    let chain_id = hex::encode(hasher.finalize());
+
+    let request = VerifyRequest {
+        chain_id,
+        file_path: file_path.to_string(),
+        head_hash: head_hash.to_string(),
+    };
+
+    let client = reqwest::Client::new();
+    let response = client.post(url)
+        .json(&request)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let verify_resp: VerifyResponse = response.json().await?;
+        Ok(verify_resp.match_found)
+    } else {
+        Err(format!("Server returned error: {}", response.status()).into())
+    }
+}
