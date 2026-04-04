@@ -14,3 +14,11 @@
     "NEW INSTRUCTION": "WHEN calling verify_with_server THEN hash file_path for chain_id and use latest code_hash"
 }
 
+[2026-04-04 11:30] - Updated by Junie
+{
+    "TYPE": "correction",
+    "CATEGORY": "server response parsing",
+    "EXPECTATION": "verify_with_server must parse the 'valid' boolean from the server's JSON and return true when 'valid': true; also print the raw response body for debugging.",
+    "NEW INSTRUCTION": "WHEN receiving /verify response THEN read 'valid' boolean and print raw body"
+}
+

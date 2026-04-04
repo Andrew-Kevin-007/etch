@@ -24,9 +24,9 @@ struct VerifyRequest {
     head_hash: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct VerifyResponse {
-    match_found: bool,
+    valid: bool,
 }
 
 pub fn get_server_url() -> String {
@@ -116,12 +116,16 @@ pub async fn verify_with_server(file_path: &str, chain: &AuthorshipChain) -> Res
             .send()
             .await?;
 
-        if response.status().is_success() {
-            let verify_resp: VerifyResponse = response.json().await?;
-            if verify_resp.match_found {
+        let status = response.status();
+        let body_text = response.text().await?;
+        println!("DEBUG verify: raw response: {}", body_text);
+
+        if status.is_success() {
+            let verify_resp: VerifyResponse = serde_json::from_str(&body_text)?;
+            if verify_resp.valid {
                 return Ok(true);
             }
-        } else if response.status() != reqwest::StatusCode::NOT_FOUND {
+        } else if status != reqwest::StatusCode::NOT_FOUND {
             // If it's not a 404/Not Found, maybe something is wrong, but we continue checking?
             // Actually, if we get an error from server, we might want to return it or just continue.
             // Let's stick to matching true and continuing if not.
