@@ -5,7 +5,20 @@
       "timestamp": "2026-04-03T16:45:41.403542500+00:00",
       "code_hash": "721843255c81840be1648d50977aea21ec7ae366fde75ade1a41ebdf78d1454f",
       "prev_hash": "genesis",
+      "metadata": null,
       "signature": "88ec6522cfc9a1ac66c92614acda1016ab47de365cc1b609eef4fa135b464b40af3765ff1c554582d4b6f8e28762adc1279eb1a62591bdd446c25d399b2f7909"
+    },
+    {
+      "contributor_pubkey": "a6805901ffe694a25648f6c76f672c5f64a5f47c3ccaf19093e7118fd6ba5b42",
+      "timestamp": "2026-04-04T13:45:45.198305400+00:00",
+      "code_hash": "bc9e65a0d4d80d97c75aa8982cc013445df7be56c9529983434d018ab32cb109",
+      "prev_hash": "f53708d501a5743885581cd236e058b9061ed0d2e7ac0d7a45cbd095ff31f709",
+      "metadata": {
+        "project": "Manual Project",
+        "name": "Manual Name",
+        "domain": "Manual Domain"
+      },
+      "signature": "ecc0d0cc19b8d671e07d2f41661a29452d2133353642505117258328b74b572399f6ecb8eb1c031659f46037fa5f8a4047168a1776de6043423be5541fd3470c"
     }
   ]
 }

@@ -2,7 +2,8 @@ use clap::{Parser, Subcommand};
 use etch::chain::AuthorshipChain;
 use etch::fingerprint;
 use etch::identity::EtchIdentity;
-use std::process;
+use std::collections::HashMap;
+use std::{io, process};
 
 /// etch: A CLI tool for data integrity and provenance.
 #[derive(Parser)]
@@ -10,6 +11,10 @@ use std::process;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Path to the identity file (~/.etch/identity.json)
+    #[arg(long, env = "ETCH_IDENTITY_PATH")]
+    identity_path: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -26,6 +31,15 @@ enum Commands {
         /// Force signing even if contribution analysis fails
         #[arg(short, long)]
         force: bool,
+        /// human-readable name for this file/module
+        #[arg(long)]
+        name: Option<String>,
+        /// project name
+        #[arg(long)]
+        project: Option<String>,
+        /// domain or category
+        #[arg(long)]
+        domain: Option<String>,
     },
     /// Verify the integrity and authorship chain of a signed file
     Verify {
@@ -40,6 +54,12 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+
+    if let Some(path) = &cli.identity_path {
+        unsafe {
+            std::env::set_var("ETCH_IDENTITY_PATH", path);
+        }
+    }
 
     if let Err(e) = run(cli) {
         match e.downcast_ref::<std::io::Error>() {
@@ -67,9 +87,50 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let identity = EtchIdentity::load()?;
             println!("Public Key: {}", identity.public_key_hex());
         }
-        Some(Commands::Sign { path, force }) => {
+        Some(Commands::Sign { path, force, name, project, domain }) => {
             let identity = EtchIdentity::load()?;
             
+            // Metadata gathering
+            let mut metadata = HashMap::new();
+            
+            let name = match name {
+                Some(n) => n,
+                None => {
+                    print!("Enter name for this file/module: ");
+                    io::Write::flush(&mut io::stdout())?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    input.trim().to_string()
+                }
+            };
+            if !name.is_empty() { metadata.insert("name".to_string(), name); }
+
+            let project = match project {
+                Some(p) => p,
+                None => {
+                    print!("Enter project name: ");
+                    io::Write::flush(&mut io::stdout())?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    input.trim().to_string()
+                }
+            };
+            if !project.is_empty() { metadata.insert("project".to_string(), project); }
+
+            let domain = match domain {
+                Some(d) => d,
+                None => {
+                    print!("Enter domain or category: ");
+                    io::Write::flush(&mut io::stdout())?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    input.trim().to_string()
+                }
+            };
+            if !domain.is_empty() { metadata.insert("domain".to_string(), domain); }
+
+            let metadata_opt = if metadata.is_empty() { None } else { Some(metadata) };
+
             // Contribution analysis
             let analysis_result = etch::analyzer::parse_file(&path);
             
@@ -86,7 +147,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             "genesis".to_string()
                         };
 
-                        let fingerprint = fingerprint::sign_file(&path, &identity, prev_hash)?;
+                        let fingerprint = fingerprint::sign_file(&path, &identity, prev_hash, metadata_opt)?;
                         chain.append(fingerprint)?;
                         chain.save_for_file(&path)?;
                         
@@ -134,7 +195,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 "genesis".to_string()
             };
 
-            let fingerprint = fingerprint::sign_file(&path, &identity, prev_hash)?;
+            let fingerprint = fingerprint::sign_file(&path, &identity, prev_hash, metadata_opt)?;
             chain.append(fingerprint)?;
             chain.save_for_file(&path)?;
             

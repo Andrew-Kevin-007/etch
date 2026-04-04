@@ -1,0 +1,16 @@
+{
+  "fingerprints": [
+    {
+      "contributor_pubkey": "ee5c8b2264fbd443cbdd5d3a3b5a4fb394a2eadc1f09ed1c85acd69b17d00b3e",
+      "timestamp": "2026-04-04T13:54:34.793705600+00:00",
+      "code_hash": "99f86e1be6de5ae82b3f23977b65ebe43cb8359b37b6cf0ab8e6c2eaa0c99193",
+      "prev_hash": "genesis",
+      "metadata": {
+        "project": "P",
+        "domain": "D",
+        "name": "N"
+      },
+      "signature": "12d27d9e19235f1b2a8c9ef0ce283c63b735ac33ac7f3b53f99d1f2857e7dbc350c114442d6c7f60adf9924f72f0f71a2bd16440197f48f50c8709d13ab93b0b"
+    }
+  ]
+}

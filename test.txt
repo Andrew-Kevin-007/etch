@@ -1,1 +1,0 @@
-"Hello Etch" ; cargo run -- sign --path test.txt 

@@ -15,6 +15,7 @@ struct AnchorRequest {
     chain_depth: usize,
     contributor_pubkey: String,
     timestamp: String,
+    chain_data: String,
 }
 
 #[derive(Serialize)]
@@ -49,6 +50,8 @@ pub async fn anchor_chain(file_path: &str, chain: &AuthorshipChain, identity: &E
     let chain_id = hex::encode(hasher.finalize());
     println!("DEBUG anchor: chain_id={} head_hash={}", chain_id, head_hash);
 
+    let chain_data = serde_json::to_string(chain)?;
+
     let request = AnchorRequest {
         chain_id,
         file_path: file_path.to_string(),
@@ -56,6 +59,7 @@ pub async fn anchor_chain(file_path: &str, chain: &AuthorshipChain, identity: &E
         chain_depth: chain.fingerprints.len(),
         contributor_pubkey: identity.public_key_hex(),
         timestamp: Utc::now().to_rfc3339(),
+        chain_data,
     };
 
     let client = reqwest::Client::new();

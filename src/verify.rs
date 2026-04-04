@@ -24,16 +24,6 @@ pub struct VerificationReport {
     pub results: Vec<CheckResult>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SigningPayload<'a> {
-    protocol_tag: &'a str,
-    hash_algorithm: &'a str,
-    code_hash: &'a str,
-    contributor_pubkey: &'a str,
-    prev_hash: &'a str,
-    timestamp: &'a str,
-}
-
 pub fn verify_file(path: &str) -> io::Result<VerificationReport> {
     let mut report = VerificationReport {
         verdict: true,
@@ -110,16 +100,23 @@ pub fn verify_file(path: &str) -> io::Result<VerificationReport> {
         }
 
         // 2. Canonical Payload Reconstruction & 3. Signature Validity
-        let payload = SigningPayload {
-            protocol_tag: "etch-v1",
-            hash_algorithm: "sha2-256",
-            code_hash: &f.code_hash,
-            contributor_pubkey: &f.contributor_pubkey,
-            prev_hash: &f.prev_hash,
-            timestamp: &f.timestamp,
-        };
+        let mut payload = std::collections::HashMap::new();
+        payload.insert("protocol_tag".to_string(), "etch-v1".to_string());
+        payload.insert("hash_algorithm".to_string(), "sha2-256".to_string());
+        payload.insert("code_hash".to_string(), f.code_hash.clone());
+        payload.insert("contributor_pubkey".to_string(), f.contributor_pubkey.clone());
+        payload.insert("prev_hash".to_string(), f.prev_hash.clone());
+        payload.insert("timestamp".to_string(), f.timestamp.clone());
+        
+        if let Some(meta) = &f.metadata {
+            for (k, v) in meta {
+                payload.insert(k.clone(), v.clone());
+            }
+        }
 
-        let canonical_payload = match serde_json::to_vec(&payload) {
+        // Canonical serialization: use BTreeMap to ensure sorted keys for stable JSON
+        let sorted_payload: std::collections::BTreeMap<_, _> = payload.into_iter().collect();
+        let canonical_payload = match serde_json::to_vec(&sorted_payload) {
             Ok(p) => p,
             Err(_) => {
                 report.verdict = false;
@@ -299,12 +296,38 @@ mod tests {
         fs::write(path, content).unwrap();
     }
 
+    fn sign_with_metadata(
+        id: &EtchIdentity,
+        code_hash: &str,
+        prev_hash: &str,
+        timestamp: &str,
+        metadata: Option<std::collections::HashMap<String, String>>,
+    ) -> String {
+        let mut payload = std::collections::HashMap::new();
+        payload.insert("protocol_tag".to_string(), "etch-v1".to_string());
+        payload.insert("hash_algorithm".to_string(), "sha2-256".to_string());
+        payload.insert("code_hash".to_string(), code_hash.to_string());
+        payload.insert("contributor_pubkey".to_string(), id.public_key_hex());
+        payload.insert("prev_hash".to_string(), prev_hash.to_string());
+        payload.insert("timestamp".to_string(), timestamp.to_string());
+        
+        if let Some(meta) = &metadata {
+            for (k, v) in meta {
+                payload.insert(k.clone(), v.clone());
+            }
+        }
+
+        let sorted_payload: std::collections::BTreeMap<_, _> = payload.into_iter().collect();
+        let canonical = serde_json::to_vec(&sorted_payload).unwrap();
+        hex::encode(id.signing_key.sign(&canonical).to_bytes())
+    }
+
     #[test]
     fn test_signature_verify_valid() {
         let id = setup_test_identity();
         let path = "test_sig_valid.txt";
         create_test_file(path, "hello");
-        let f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let f = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         
         let mut chain = AuthorshipChain::new();
         chain.append(f).unwrap();
@@ -322,7 +345,7 @@ mod tests {
         let id2 = setup_test_identity();
         let path = "test_sig_wrong_key.txt";
         create_test_file(path, "hello");
-        let mut f = sign_file(path, &id1, "genesis".to_string()).unwrap();
+        let mut f = sign_file(path, &id1, "genesis".to_string(), None).unwrap();
         
         // Tamper with pubkey
         f.contributor_pubkey = id2.public_key_hex();
@@ -343,7 +366,7 @@ mod tests {
         let id = setup_test_identity();
         let path = "test_sig_tamper.txt";
         create_test_file(path, "hello");
-        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let mut f = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         
         // Tamper with signature bytes
         let mut sig_bytes = hex::decode(&f.signature).unwrap();
@@ -366,7 +389,7 @@ mod tests {
         let id = setup_test_identity();
         let path = "test_sig_malformed.txt";
         create_test_file(path, "hello");
-        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let mut f = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         
         // Malformed hex length
         f.signature = "abc123".to_string();
@@ -390,7 +413,7 @@ mod tests {
         create_test_file(path1, "hello");
         create_test_file(path2, "world");
         
-        let f1 = sign_file(path1, &id, "genesis".to_string()).unwrap();
+        let f1 = sign_file(path1, &id, "genesis".to_string(), None).unwrap();
         
         // Replay f1 onto path2
         let mut chain2 = AuthorshipChain::new();
@@ -415,11 +438,11 @@ mod tests {
         create_test_file(path, "hello");
         
         let mut chain = AuthorshipChain::new();
-        let f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let f1 = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         let h1 = hash_fingerprint(&f1).unwrap();
         chain.append(f1).unwrap();
         
-        let f2 = sign_file(path, &id, h1).unwrap();
+        let f2 = sign_file(path, &id, h1, None).unwrap();
         chain.append(f2).unwrap();
         
         chain.save_for_file(path).unwrap();
@@ -439,11 +462,11 @@ mod tests {
         create_test_file(path, "hello");
         
         let mut chain = AuthorshipChain::new();
-        let f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let f1 = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         let h1 = hash_fingerprint(&f1).unwrap();
         chain.append(f1).unwrap();
         
-        let mut f2 = sign_file(path, &id, h1).unwrap();
+        let mut f2 = sign_file(path, &id, h1, None).unwrap();
         f2.prev_hash = "wrong".to_string();
         chain.fingerprints.push(f2);
         
@@ -464,9 +487,9 @@ mod tests {
         create_test_file(path, "hello");
         
         let mut chain = AuthorshipChain::new();
-        let f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let f1 = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         let h1 = hash_fingerprint(&f1).unwrap();
-        let f2 = sign_file(path, &id, h1).unwrap();
+        let f2 = sign_file(path, &id, h1, None).unwrap();
         
         chain.fingerprints.push(f2);
         chain.fingerprints.push(f1);
@@ -487,7 +510,7 @@ mod tests {
         let id = setup_test_identity();
         let path = "test_tamper_hash.txt";
         create_test_file(path, "hello");
-        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let mut f = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         
         f.code_hash = hex::encode([0u8; 32]); // wrong hash
 
@@ -509,7 +532,7 @@ mod tests {
         let id = setup_test_identity();
         let path = "test_tamper_content.txt";
         create_test_file(path, "hello");
-        let f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let f = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         
         let mut chain = AuthorshipChain::new();
         chain.append(f).unwrap();
@@ -532,39 +555,21 @@ mod tests {
         let path = "test_time_mono.txt";
         create_test_file(path, "hello");
         
-        let mut f1 = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let mut f1 = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         // Set f1 to 2 minute in future
         f1.timestamp = (Utc::now() + Duration::minutes(2)).to_rfc3339();
         
         // RE-SIGN f1 because timestamp changed
-        let payload1 = SigningPayload {
-            protocol_tag: "etch-v1",
-            hash_algorithm: "sha2-256",
-            code_hash: &f1.code_hash,
-            contributor_pubkey: &f1.contributor_pubkey,
-            prev_hash: &f1.prev_hash,
-            timestamp: &f1.timestamp,
-        };
-        let canonical1 = serde_json::to_vec(&payload1).unwrap();
-        f1.signature = hex::encode(id.signing_key.sign(&canonical1).to_bytes());
+        f1.signature = sign_with_metadata(&id, &f1.code_hash, &f1.prev_hash, &f1.timestamp, f1.metadata.clone());
 
         let h1 = hash_fingerprint(&f1).unwrap();
         
-        let mut f2 = sign_file(path, &id, h1).unwrap();
+        let mut f2 = sign_file(path, &id, h1, None).unwrap();
         // f2 is now, which is earlier than f1
         f2.timestamp = Utc::now().to_rfc3339();
         
         // RE-SIGN f2 because timestamp changed
-        let payload2 = SigningPayload {
-            protocol_tag: "etch-v1",
-            hash_algorithm: "sha2-256",
-            code_hash: &f2.code_hash,
-            contributor_pubkey: &f2.contributor_pubkey,
-            prev_hash: &f2.prev_hash,
-            timestamp: &f2.timestamp,
-        };
-        let canonical2 = serde_json::to_vec(&payload2).unwrap();
-        f2.signature = hex::encode(id.signing_key.sign(&canonical2).to_bytes());
+        f2.signature = sign_with_metadata(&id, &f2.code_hash, &f2.prev_hash, &f2.timestamp, f2.metadata.clone());
         
         let mut chain = AuthorshipChain::new();
         chain.fingerprints.push(f1);
@@ -585,20 +590,11 @@ mod tests {
         let path = "test_time_future.txt";
         create_test_file(path, "hello");
         
-        let mut f = sign_file(path, &id, "genesis".to_string()).unwrap();
+        let mut f = sign_file(path, &id, "genesis".to_string(), None).unwrap();
         f.timestamp = (Utc::now() + Duration::minutes(10)).to_rfc3339(); // 10 mins in future
         
         // RE-SIGN because timestamp changed
-        let payload = SigningPayload {
-            protocol_tag: "etch-v1",
-            hash_algorithm: "sha2-256",
-            code_hash: &f.code_hash,
-            contributor_pubkey: &f.contributor_pubkey,
-            prev_hash: &f.prev_hash,
-            timestamp: &f.timestamp,
-        };
-        let canonical = serde_json::to_vec(&payload).unwrap();
-        f.signature = hex::encode(id.signing_key.sign(&canonical).to_bytes());
+        f.signature = sign_with_metadata(&id, &f.code_hash, &f.prev_hash, &f.timestamp, f.metadata.clone());
 
         let mut chain = AuthorshipChain::new();
         chain.fingerprints.push(f);

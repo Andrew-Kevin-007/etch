@@ -5,6 +5,7 @@
       "timestamp": "2026-03-30T08:01:01.879723600+00:00",
       "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
       "prev_hash": "genesis",
+      "metadata": null,
       "signature": "4979c7f3bd709edca796c68f497df188938ba4279e56f2ff8525fdb46fa4430d2489678066005d2dde9acc533a60389d54da55616c1e3d3c3330f81f6082a907"
     },
     {
@@ -12,6 +13,7 @@
       "timestamp": "2026-04-04T05:35:11.367901300+00:00",
       "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
       "prev_hash": "57b6679dde03dadab8b6ea3b7697e69b278a0b1bde99cc39adc946ab6019d7c6",
+      "metadata": null,
       "signature": "d42e449b3b45ca0f436efcd150a5791e2fa25a122730945e2ddecaed0441626996df902ccd8a86828e7e84cf88383a6aab81ae51efcbb60b36cb9f07b1106d09"
     },
     {
@@ -19,6 +21,7 @@
       "timestamp": "2026-04-04T05:40:51.419173100+00:00",
       "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
       "prev_hash": "f02743827c477b64ad014b5ce7b5279b27c5a9e2be1714fc71c2722fe39d5a28",
+      "metadata": null,
       "signature": "0f92d88ee4462cb9de1f25d9b493d138ee1222262ae27e80037bf5519c557076d0cb9fffc48405b5f1b9ba481ec666f51bbe352c997952183cef71c558a14803"
     },
     {
@@ -26,6 +29,7 @@
       "timestamp": "2026-04-04T05:48:45.449832500+00:00",
       "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
       "prev_hash": "905684badc947e2e4df00d49e8ab390f1a96c2ae4afd2bf5cdadef3f34c992d7",
+      "metadata": null,
       "signature": "616c5c635f38b8ad2254083b54b526e81e1d8409e88549e4492f348b6c8e7f045c3db2c525156e492bbd302e742670772645b0e777ea53f42110310a5fc91a0a"
     },
     {
@@ -33,6 +37,7 @@
       "timestamp": "2026-04-04T05:49:01.489584500+00:00",
       "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
       "prev_hash": "66fa61aa5ccc77de1e35f578770ea806d600e97b0dfda6a49f0b9a609a1d6257",
+      "metadata": null,
       "signature": "ecea0386bfb8380c3aea03b7bf24a36a1f0c8400c0737b42a58b3b52fa69b3466919b8247b173842e7bb208403c1450df1098ccfd240fabb1b433219da65f30b"
     },
     {
@@ -40,7 +45,20 @@
       "timestamp": "2026-04-04T05:53:45.969606+00:00",
       "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
       "prev_hash": "08ad846e19b5165d12ef335f509016c7f28cca1689dc26b5c9c1f56e8e1e8a14",
+      "metadata": null,
       "signature": "c44d34efbe179526a731372f47b5be981a2b572ab5c974b2ed72cfabad22077c69ae22d277619d499fac5d55a72f3dd37c3008f75b17b6a9a82af7a398e3d808"
+    },
+    {
+      "contributor_pubkey": "5ce6490a3009c46c9d80994179d5162adb3ef216dde9e5740d6d29e398cad919",
+      "timestamp": "2026-04-04T13:42:29.456537400+00:00",
+      "code_hash": "abbc6233c875d9f75760b15cacc6b80d4b7d844b30a506971e2c8c9315755263",
+      "prev_hash": "e6819eff4f1cd7fa8ca3b72e528783d3403f5175ebf6b4c24dd30e6fe90c4abb",
+      "metadata": {
+        "name": "Test Name",
+        "project": "Test Project",
+        "domain": "Test Domain"
+      },
+      "signature": "a291e96f21dc8ce5acc9a08943181252e410ae42b1f9f139630b86a29d203ac2df511a6a87e93ae5693e4d71962de1b76c62663b41fce66b62fbd75440d83503"
     }
   ]
 }

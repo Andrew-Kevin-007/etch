@@ -26,6 +26,13 @@ impl EtchIdentity {
 
     /// Path to the identity file (~/.etch/identity.json)
     fn get_path() -> io::Result<PathBuf> {
+        if let Ok(path) = std::env::var("ETCH_IDENTITY_PATH") {
+            let path = PathBuf::from(path);
+            if path.is_dir() {
+                return Ok(path.join("identity.json"));
+            }
+            return Ok(path);
+        }
         let home = dirs::home_dir().ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "Could not find home directory")
         })?;
