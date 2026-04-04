@@ -138,3 +138,46 @@ pub async fn verify_with_server(file_path: &str, chain: &AuthorshipChain) -> Res
 
     Ok(false)
 }
+
+pub async fn register_dependencies(file_path: &str, depends_on: Vec<String>) -> Result<()> {
+    let server_url = get_server_url();
+    
+    // chain_id is SHA-256 of file_path
+    let mut hasher = Sha256::new();
+    hasher.update(file_path.as_bytes());
+    let chain_id = hex::encode(hasher.finalize());
+    
+    let client = reqwest::Client::new();
+    
+    for dependency in depends_on {
+        let url = format!("{}/anchors/{}/dependencies", server_url, chain_id);
+        
+        #[derive(Serialize)]
+        struct DependencyRequest {
+            dependency_id: String,
+        }
+        
+        let request = DependencyRequest {
+            dependency_id: dependency.clone(),
+        };
+        
+        let response = client.post(&url)
+            .json(&request)
+            .send()
+            .await;
+            
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                println!("✓ Dependency {} registered for {}", dependency, chain_id);
+            }
+            Ok(resp) => {
+                eprintln!("Warning: Failed to register dependency {}: Server returned status {}", dependency, resp.status());
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to register dependency {}: {}", dependency, e);
+            }
+        }
+    }
+    
+    Ok(())
+}

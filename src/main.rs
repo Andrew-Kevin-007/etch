@@ -40,6 +40,9 @@ enum Commands {
         /// domain or category
         #[arg(long)]
         domain: Option<String>,
+        /// comma-separated list of chain_ids that this file depends on
+        #[arg(long, value_delimiter = ',')]
+        depends_on: Option<Vec<String>>,
     },
     /// Verify the integrity and authorship chain of a signed file
     Verify {
@@ -87,7 +90,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let identity = EtchIdentity::load()?;
             println!("Public Key: {}", identity.public_key_hex());
         }
-        Some(Commands::Sign { path, force, name, project, domain }) => {
+        Some(Commands::Sign { path, force, name, project, domain, depends_on }) => {
             let identity = EtchIdentity::load()?;
             
             // Metadata gathering
@@ -157,6 +160,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         let rt = tokio::runtime::Runtime::new()?;
                         let _ = rt.block_on(etch::notary::anchor_chain(&path, &chain, &identity));
 
+                        if let Some(deps) = depends_on {
+                            if !deps.is_empty() {
+                                let _ = rt.block_on(etch::notary::register_dependencies(&path, deps));
+                            }
+                        }
+
                         return Ok(());
                     } else {
                         return Err(e);
@@ -204,6 +213,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // Anchoring to notarization server
             let rt = tokio::runtime::Runtime::new()?;
             let _ = rt.block_on(etch::notary::anchor_chain(&path, &chain, &identity));
+
+            if let Some(deps) = depends_on {
+                if !deps.is_empty() {
+                    let _ = rt.block_on(etch::notary::register_dependencies(&path, deps));
+                }
+            }
         }
         Some(Commands::Verify { path, json }) => {
             let mut report = etch::verify::verify_file(&path)?;
