@@ -377,7 +377,7 @@ fn run_interactive_tui() -> Result<(), Box<dyn std::error::Error>> {
         let identity_res = EtchIdentity::load();
         let pubkey = identity_res.as_ref().map(|i| i.public_key_hex()).unwrap_or_else(|_| "Not initialized".to_string());
         let truncated_pubkey = if pubkey.len() > 16 {
-            format!("{}...{}", &pubkey[..8], &pubkey[pubkey.len()-8..])
+            format!("{}...", &pubkey[..16])
         } else {
             pubkey.clone()
         };
@@ -387,12 +387,13 @@ fn run_interactive_tui() -> Result<(), Box<dyn std::error::Error>> {
         // Throttled Server connection status
         if last_server_check.elapsed() > std::time::Duration::from_secs(5) {
             let server_url = etch::notary::get_server_url();
+            let healthz_url = format!("{}/healthz", server_url);
             if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
                 let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_millis(500))
+                    .timeout(std::time::Duration::from_millis(1000))
                     .build();
                 if let Ok(c) = client {
-                    server_connected = rt.block_on(async { c.get(&server_url).send().await.is_ok() });
+                    server_connected = rt.block_on(async { c.get(&healthz_url).send().await.is_ok() });
                 }
             }
             last_server_check = std::time::Instant::now();
@@ -411,7 +412,7 @@ fn run_interactive_tui() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect();
             files.sort_by(|a, b| b.1.cmp(&a.1));
-            recent_files = files.into_iter().take(3).map(|(p, _)| p).collect();
+            recent_files = files.into_iter().take(3).map(|(p, m)| (p, m)).collect();
         }
 
         terminal.draw(|f| {
@@ -429,88 +430,80 @@ fn run_interactive_tui() -> Result<(), Box<dyn std::error::Error>> {
 
             // Top bar
             let version = env!("CARGO_PKG_VERSION");
-            let top_text = format!("── etch v{} ──────────────────────────────", version);
-            f.render_widget(Paragraph::new(top_text).style(Style::default().fg(accent_color)), chunks[0]);
+            let top_text = format!("── etch v{} ──────────────────────────────────────", version);
+            f.render_widget(Paragraph::new(top_text).style(Style::default().fg(Color::White)), chunks[0]);
 
             // Main content split
             let main_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
-                    Constraint::Percentage(33),
-                    Constraint::Percentage(67),
+                    Constraint::Percentage(40),
+                    Constraint::Percentage(60),
                 ])
                 .split(chunks[1]);
 
             // Left Panel
-            let logo = r#"
-      _       _
-  ___| |_ ___| |__
- / _ \ __/ __| '_ \
-|  __/ || (__| | | |
- \___|\__\___|_| |_|
-"#;
             let mut left_text = Vec::new();
-            left_text.push(Line::from(Span::styled(logo, Style::default().fg(accent_color))));
+            left_text.push(Line::from(Span::styled("Welcome back!", Style::default().add_modifier(Modifier::BOLD))));
             left_text.push(Line::from(""));
             left_text.push(Line::from(vec![
-                Span::raw(" identity  "),
-                Span::styled(truncated_pubkey, Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw("Identity: "),
+                Span::raw(truncated_pubkey),
             ]));
             left_text.push(Line::from(vec![
-                Span::raw(" path      "),
-                Span::styled(current_dir, Style::default().fg(Color::DarkGray)),
+                Span::raw("Directory: "),
+                Span::raw(current_dir),
             ]));
             
             let status_dot = if server_connected { 
-                Span::styled(" ● ", Style::default().fg(accent_color)) 
+                Span::styled("● ", Style::default().fg(Color::Green)) 
             } else { 
-                Span::styled(" ● ", Style::default().fg(Color::Red)) 
+                Span::styled("● ", Style::default().fg(Color::Red)) 
             };
             left_text.push(Line::from(vec![
-                Span::raw(" server   "),
+                Span::raw("Server: "),
                 status_dot,
                 Span::raw(if server_connected { "Connected" } else { "Disconnected" }),
             ]));
 
             let left_panel = Paragraph::new(left_text)
-                .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)).padding(ratatui::widgets::Padding::horizontal(1)));
+                .block(Block::default().padding(ratatui::widgets::Padding::horizontal(1)));
             f.render_widget(left_panel, main_chunks[0]);
 
             // Right Panel
             let mut right_text = Vec::new();
-            right_text.push(Line::from(""));
-            right_text.push(Line::from(Span::styled("  Quick start", Style::default().add_modifier(Modifier::BOLD))));
-            right_text.push(Line::from(""));
+            right_text.push(Line::from(Span::styled("Quick commands", Style::default().fg(Color::Green))));
             
             let commands = [
                 ("etch init", "create your identity"),
-                ("etch sign <file>", "sign a file"),
-                ("etch verify <file>", "verify authorship"),
+                ("etch sign", "sign a file"),
+                ("etch verify", "verify authorship"),
                 ("etch status", "view your profile"),
             ];
 
             for (cmd, desc) in commands {
                 right_text.push(Line::from(vec![
-                    Span::raw("    "),
-                    Span::styled("> ", Style::default().fg(accent_color)),
-                    Span::styled(cmd, Style::default().fg(accent_color)),
-                    Span::raw(format!(" — {}", desc)),
+                    Span::raw(format!("  {:<12} — {}", cmd, desc)),
                 ]));
             }
 
             right_text.push(Line::from(""));
-            right_text.push(Line::from(Span::styled("  Recent signatures", Style::default().add_modifier(Modifier::BOLD))));
-            right_text.push(Line::from(""));
+            right_text.push(Line::from(Span::styled("Recent activity", Style::default().fg(Color::Green))));
 
             if recent_files.is_empty() {
-                right_text.push(Line::from(Span::styled("    No recent signatures found.", Style::default().fg(Color::DarkGray))));
+                right_text.push(Line::from(Span::styled("  No recent activity found.", Style::default().fg(Color::DarkGray))));
             } else {
-                for file in &recent_files {
-                    let display_name = file.strip_suffix(".etch").unwrap_or(file);
+                for (file, modified) in &recent_files {
+                    let filename = std::path::Path::new(file)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(file);
+                    
+                    let dt: chrono::DateTime<chrono::Local> = (*modified).into();
+                    let timestamp = dt.format("%Y-%m-%d %H:%M").to_string();
+
                     right_text.push(Line::from(vec![
-                        Span::raw("    "),
-                        Span::styled("✓ ", Style::default().fg(accent_color)),
-                        Span::raw(display_name.to_string()),
+                        Span::raw(format!("  {} ({})", filename, timestamp)),
                     ]));
                 }
             }
@@ -518,31 +511,21 @@ fn run_interactive_tui() -> Result<(), Box<dyn std::error::Error>> {
             if let Some((msg, color)) = &message {
                 right_text.push(Line::from(""));
                 right_text.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(msg, Style::default().fg(*color)),
+                    Span::styled(format!("  {}", msg), Style::default().fg(*color)),
                 ]));
             }
 
-            let right_panel = Paragraph::new(right_text)
-                .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+            let right_panel = Paragraph::new(right_text);
             f.render_widget(right_panel, main_chunks[1]);
 
             // Bottom bar
-            let footer = Line::from(vec![
-                Span::styled(" ? ", Style::default().fg(Color::DarkGray)),
-                Span::styled("help  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" q ", Style::default().fg(Color::DarkGray)),
-                Span::styled("quit  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" s ", Style::default().fg(Color::DarkGray)),
-                Span::styled("sign  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" v ", Style::default().fg(Color::DarkGray)),
-                Span::styled("verify  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(" i ", Style::default().fg(Color::DarkGray)),
-                Span::styled("init  ", Style::default().fg(Color::DarkGray)),
-                Span::raw(" ".repeat(size.width.saturating_sub(55) as usize)),
-                Span::styled("etch protocol v1", Style::default().fg(Color::DarkGray)),
-            ]);
-            f.render_widget(Paragraph::new(footer), chunks[2]);
+            let footer_text = format!("{:<width$}{:>}", 
+                "? help  i init  s sign  v verify  q quit", 
+                "etch protocol v1", 
+                width = (size.width as usize).saturating_sub(16)
+            );
+            
+            f.render_widget(Paragraph::new(footer_text).style(Style::default().fg(Color::DarkGray)), chunks[2]);
 
             // Input Modal
             if input_active {
